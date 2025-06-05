@@ -4,7 +4,5 @@
  (name scheduler)
  (public_name scheduler)
  (libraries
-  yojson
-  sqlite3
   str
   unix))
