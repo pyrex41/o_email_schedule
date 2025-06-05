@@ -1,0 +1,53 @@
+# OCaml
+_build/
+*.annot
+*.cmx
+*.cmxa
+*.cmxs
+*.cmxdep
+*.cma
+*.cmxa
+*.cmi
+*.cmo
+*.cmj
+*.cmti
+*.a
+*.o
+*.so
+*.out
+*.out.cache
+.merlin
+*.exe
+_opam/
+_coverage/
+bisect*.coverage
+
+# Build artifacts
+medicare_email_schedule.install
+
+# Local database
+*.db
+*.db-shm
+*.db-wal
+
+# Configuration
+.env
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

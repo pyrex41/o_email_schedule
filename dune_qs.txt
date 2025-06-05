@@ -1,0 +1,275 @@
+Qable’s core functionality. Add modules to your library by creating new .ml files in this directory. uickstart - Dune documentation
+This document gives simple usage examples of Dune. You can also look at examples for complete examples of projects using Dune with CRAM stanzas.
+    See library for details on specifying libraries ma
+To try these examples, you will need to have Dune installed. See How to Install Dune.
+       nually.
+          e executable program. Within the modules in this d
+The bin directory holds a skeleton for th
+Initializingirectory, you can access the modules in your lib under the namespace project_name.Mod, where project Projects
+The following subsections illustrate basic usage of the dune init proj subcommand. For more documentation, see Initializing Components and the inline help available from dune init --help.
+               _name is replaced with the name of your project an
+Initializing an Executable
+To initialize a prd Mod corresponds to the name of the file in the loject that will build an executable program, run the following (replacing project_name with the name of your project):
+
+$ dune init proj projib directory. You can run the executable with duneect_name
+This creates a project d exec project_name. See Building a Hello World Proirectory that includes the following contents:
+
+project_name/              gram From Scratch for an example of specifying an 
+├── dune-project
+├── test                     executable manually and executable for details.
+
+T                               he project_name.opam file will be freshly generate
+│   ├── dune
+│   └── test_project_name.ml       d from the dune-project file whenever you build yo
+├── lib                               ur project. You shouldn’t need to worry about this, but you can see How Dune integrates with opam fo
+│   └── dune
+├── bin                                  r details.
+
+The dune files in each directory speci      fy the component to be built with the files in tha
+│   ├── dune
+│   └── main.ml                               t directory. For details on dune files, see dune.
+
+└── project_name.opam                           
+Initializing a Library                              r an OCaml library, run the following (replacing p
+To initialize a project fo
+Now, enter your project’s directory:                   roject_name with the name of your project):
+
+$ dun                                                     e init proj --kind=lib project_name
+This creates a                                                     project directory that includes the following con
+                                                             tents:
+
+project_name/                                                  an build your project with:
+                                                                  mponents generated are the same as those described
+$ dune build
+You can                                                  run your tes in Initializing an Executable, with the followingts with:
+
+$ dune test                                                             h
+Create a new directory within a Dune project (In second file containing the following code and name it hello_world.ml (including the .ml extension). It will implement the executable stanza in the dune file when built.
+
+print_endline "Hello, world!"
+Next, build your new program in a shell using thi-- ./hello_world.exe
+Voila! This should print “Hel World Program Using Lwt
+Lwt is a concurrent librLwt_main.run (Lwt_io.printf "Hello, world!\n")
+Andeprocess (pps ppx_jane)))
+This hello_world.ml fil rogram in Bytecode
+In a directory of your choice, world executable implemented by hello_world.ml
+;; lo_world.bc
+The executable will be built as _builds Globally
+Write this dune file at the root of yodocess (action (run %{bin:cppo} -V OCAML:%{ocaml_version} %{input-file})))
+Additionally, if you want  config.h)
+Using the .cppo.ml Style Like the ocam (targets foo.ml)
+ (deps    (:first-dep foo.cppo.ml) <other files that foo.ml includes>)
+ (action  (run %{bin:cppo} %{first-dep} -o %{targets})))
+Defining a Library with C Stubs
+Assuming you have a fi(-lblah)))
+Defining a Library with C Stubs using pkg-config
+Same context as before, but using pkg-coargets c_flags.sexp c_library_flags.sexp)
+ (action  (run ./config/discover.exe)))
+Then create a confexp"         conf.cflags;
+C.Flags.write_sexp "c_library_flags.sexp" conf.libs)
+Using a Custom Code Generator
+To generate a file foo.ml using a progra (deps    (:gen ../generator/gen.exe))
+ (action  (ompiler-libs.toplevel mylib)
+ (link_flags (-linkalel.ml:
+
+let () = exit (Topmain.main ())l))
+ (modes      byte))
+And write this in mytoplevexecutable
+ (name       mytoplevel)
+ (libraries  cy an executable calling Topmain.main () and linked with the compiler libraries and -linkall. Moreover, currently toplevels can only be built in bytecode.
+
+As a result, write this in your dune file:
+
+(ote
+Building a Custom Toplevel
+A toplevel is simplfile exists, it will be compared to the standard output of the test program and the differences will be displayed. It is possible to replace the .expected file with the last output using:
+
+$ dune proml run the test program (the main module is my_test_program.ml) and error if it exits with a nonzero code.
+
+In addition, if a my_test_program.expected m))
+And run the tests with:
+
+$ dune runtest
+It wilhis in your dune file:
+
+(test (name my_test_prograrun %{gen} -o %{targets})))
+Defining Tests
+Write tm from another directory:
+
+(rule
+ (targets foo.ml)
+me deps -> deps
+in
+
+
+C.Flags.write_sexp "c_flags.sch (C.Pkg_config.query pc ~package:"gst-editing-services-1.0") with
+     | None -> default
+     | Soc with
+  | None -> default
+  | Some pc ->
+     mat libs   = ["-lgst-editing-services-1.0"]
+  ; cflags = []
+  }
+in
+let conf =
+  match C.Pkg_config.get c ->
+let default : C.Pkg_config.package_conf =
+  {Configurator.V1
+
+let () =
+C.main ~name:"foo" (fun r))
+as well as this discover.ml file:
+
+module C = able
+ (name discover)
+ (libraries dune-configuratoig subdirectory and write this dune file:
+
+(executflags (:include c_library_flags.sexp)))
+
+(rule
+ (ts)
+  (flags (:include c_flags.sexp)))
+ (c_library_wt)
+ (foreign_stubs
+  (language c)
+  (names mystubb)
+ (public_name     mylib)
+ (libraries       re lnfig to query the compilation and link flags. Write this dune file:
+
+(library
+ (name            myliubs)
+  (flags -I/blah/include))
+ (c_library_flags  lwt)
+ (foreign_stubs
+  (language c)
+  (names mystle called mystubs.c, that you need to pass -I/blah/include to compile it and -lblah at link time, write this dune file:
+
+(library
+ (name            mylib)
+ (public_name     mylib)
+ (libraries       relbuild Plugin
+Write this in your dune file:
+
+(rule
+to include a config.h file, you need to declare the dependency to this file via:
+
+(preprocessor_depseld to your library or executable stanzas:
+
+(preprbuild profile can be selected from the command line with --profile foo or from a dune-workspace file by writing:
+
+(profile foo)
+Using Cppo
+Add this fiev and release correspond to build profiles. The ur project:
+
+(env
+ (dev
+  (flags (:standard -w +42)))
+ (release
+  (ocamlopt_flags (:standard -O3))))
+/default/hello_world.bc. The executable can be built and run in a single step with dune exec ./hello_world.bc. This bytecode version allows the usage of ocamldebug.
+
+Setting the OCaml Compilation Flagello, world!"
+And build it with:
+
+$ dune build hel exe))
+This hello_world.ml file:
+
+print_endline "Hto be build as native (.exe) or bytecode (.bc) version.
+(executable
+ (name hello_world)
+ (modes bytewrite this dune file:
+
+;; This declares the hello_brary in any other directory by adding mylib to the (libraries ...) field.
+
+Building a Hello World Pary will be composed of all the modules in the same directory. Outside of the library, module Foo will be accessible as Mylib.Foo, unless you write an explicit mylib.ml file.
+
+You can then use this li(public_name mylib)
+ (libraries re lwt))
+The librete this dune file:
+
+(library
+ (name        mylib)
+table will be built as _build/default/hello_world.exe
+
+Defining a Library Using Lwt and ocaml-re
+Wrid it with:
+
+$ dune build hello_world.exe
+The execu ([3;4;5] : int list)]
+  |> print_endline
+And buil:
+
+open Core
+
+let () =
+  Sexp.to_string_hum [%sexpcutable
+ (name hello_world)
+ (libraries core)
+ (pre and Jane Street PPXs
+Write this dune file:
+
+(exeexecutable will be built as _build/default/hello_world.exe
+
+Building a Hello World Program Using Cor build it with:
+
+$ dune build hello_world.exe
+The  (libraries lwt.unix))
+This hello_world.ml file:
+
+ary in OCaml.
+
+In a directory of your choice, write this dune file:
+
+(executable
+ (name hello_world)
+lo, world!” in the command line.
+
+Building a Helloee that it worked. In fact, the executable can both be built and run in a single step:
+
+$ dune exec  create a directory called _build and build the program: _build/default/hello_world.exe. Note that native code executables will have the .exe extension on all platforms (including non-Windows systems).
+
+Finally, run it with the following command to ss command:
+
+$ dune build hello_world.exe
+This willitializing an Executable). Since OCaml is a compiled language, first create a dune file in Nano, Vim, or your preferred text editor. Declare the hello_world executable by including the following stanza (shown below). Name this initial file dune and save it.
+
+(executable
+ (name hello_world))
+Create at the library should be public. See library for details.
+
+Building a Hello World Program From Scratc
+
+The dune file in the lib directory specifies tha exceptions:
+
+There is no bin directory generated.
+All of the subco
+├── dune-project
+├── lib
+│                                                               └── dune
+├── test
+│   ├── dune
+│   └── test_proje                                                            ct_name.ml
+└── project_name.opam
+Now, enter your p                                                            roject’s directory:
+
+$ cd project_name
+Then, you c
+$ cd project_name
+Then, you can build your project with:
+
+$ dune build
+You can run your tests with:
+
+$ dune test
+You can run your program with:
+
+$ dune exec project_name
+This simple project will print “Hello World” in your shell.
+
+The following itemization of the generated content isn’t necessary to review at this point. But whenever you are ready, it will provide jump-off points from which you can dive deeper into Dune’s capabilities:
+
+The dune-project file specifies metadata about the project, including its name, packaging data (including dependencies), and information about the authors and maintainers. Open this in your editor to fill in the placeholder values. See dune-project for details.
+
+The test directory contains a skeleton for your project’s tests. Add to the tests by editing test/test_project_name.ml. See Writing and Running Tests for details on testing.
+
+The lib directory will hold the library you write to provide your execut
