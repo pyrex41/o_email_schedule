@@ -1,11 +1,11 @@
 open Types
 
 let validate_email email =
-  let email_regex = Str.regexp "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$" in
+  let email_regex = Str.regexp "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z][a-zA-Z]+$" in
   Str.string_match email_regex email 0
 
 let validate_zip_code zip =
-  let zip_regex = Str.regexp "^[0-9]{5}\\(-[0-9]{4}\\)?$" in
+  let zip_regex = Str.regexp "^[0-9][0-9][0-9][0-9][0-9]\\(-[0-9][0-9][0-9][0-9]\\)?$" in
   Str.string_match zip_regex zip 0
 
 let state_from_zip_code zip_code =

@@ -2,3 +2,18 @@
  (public_name scheduler)
  (name main)
  (libraries scheduler))
+
+(executable
+ (public_name demo_simple)
+ (name demo_simple)
+ (libraries scheduler))
+
+(executable
+ (public_name test_zip)
+ (name test_zip)
+ (libraries scheduler))
+
+(executable
+ (public_name debug_validation)
+ (name debug_validation)
+ (libraries scheduler))

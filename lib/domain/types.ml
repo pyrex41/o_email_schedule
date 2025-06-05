@@ -99,3 +99,104 @@ let priority_of_email_type = function
   | Anniversary PostWindow -> 40
   | Campaign c -> c.priority
   | Followup _ -> 50
+
+(* Error types for comprehensive error handling *)
+type scheduler_error =
+  | DatabaseError of string
+  | InvalidContactData of { contact_id: int; reason: string }
+  | ConfigurationError of string
+  | ValidationError of string
+  | DateCalculationError of string
+  | LoadBalancingError of string
+  | UnexpectedError of exn
+
+type 'a scheduler_result = ('a, scheduler_error) result
+
+let string_of_error = function
+  | DatabaseError msg -> Printf.sprintf "Database error: %s" msg
+  | InvalidContactData { contact_id; reason } -> 
+      Printf.sprintf "Invalid contact data (ID %d): %s" contact_id reason
+  | ConfigurationError msg -> Printf.sprintf "Configuration error: %s" msg
+  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
+  | DateCalculationError msg -> Printf.sprintf "Date calculation error: %s" msg
+  | LoadBalancingError msg -> Printf.sprintf "Load balancing error: %s" msg
+  | UnexpectedError exn -> Printf.sprintf "Unexpected error: %s" (Printexc.to_string exn)
+
+(* Campaign system types *)
+type campaign_type_config = {
+  name: string;
+  respect_exclusion_windows: bool;
+  enable_followups: bool;
+  days_before_event: int;
+  target_all_contacts: bool;
+  priority: int;
+  active: bool;
+}
+
+type campaign_instance = {
+  id: int;
+  campaign_type: string;
+  instance_name: string;
+  email_template: string option;
+  sms_template: string option;
+  active_start_date: Simple_date.date option;
+  active_end_date: Simple_date.date option;
+  metadata: string option; (* JSON string *)
+  created_at: Simple_date.datetime;
+  updated_at: Simple_date.datetime;
+}
+
+type contact_campaign = {
+  id: int;
+  contact_id: int;
+  campaign_instance_id: int;
+  trigger_date: Simple_date.date option;
+  status: string;
+  metadata: string option; (* JSON string *)
+  created_at: Simple_date.datetime;
+  updated_at: Simple_date.datetime;
+}
+
+(* Audit trail types *)
+type scheduler_checkpoint = {
+  id: int;
+  run_timestamp: Simple_date.datetime;
+  scheduler_run_id: string;
+  contacts_checksum: string;
+  schedules_before_checksum: string option;
+  schedules_after_checksum: string option;
+  contacts_processed: int option;
+  emails_scheduled: int option;
+  emails_skipped: int option;
+  status: string;
+  error_message: string option;
+  completed_at: Simple_date.datetime option;
+}
+
+(* Load balancing types *)
+type daily_stats = {
+  date: Simple_date.date;
+  total_count: int;
+  ed_count: int;
+  campaign_count: int;
+  anniversary_count: int;
+  over_threshold: bool;
+}
+
+type load_balancing_config = {
+  daily_send_percentage_cap: float;
+  ed_daily_soft_limit: int;
+  ed_smoothing_window_days: int;
+  catch_up_spread_days: int;
+  overage_threshold: float;
+  total_contacts: int;
+}
+
+type distribution_analysis = {
+  total_emails: int;
+  total_days: int;
+  avg_per_day: float;
+  max_day: int;
+  min_day: int;
+  distribution_variance: int;
+}

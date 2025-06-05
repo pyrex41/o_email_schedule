@@ -1,0 +1,214 @@
+open Types
+open Simple_date
+
+let calculate_checksum data =
+  let hash = Hashtbl.hash data in
+  Printf.sprintf "%08x" hash
+
+let calculate_contacts_checksum (contacts : contact list) =
+  let contact_data = List.map (fun c -> (c.id, c.email, c.zip_code, c.state)) contacts in
+  calculate_checksum contact_data
+
+let calculate_schedules_checksum (schedules : email_schedule list) =
+  let schedule_data = List.map (fun s -> 
+    (s.contact_id, string_of_email_type s.email_type, string_of_date s.scheduled_date)
+  ) schedules in
+  calculate_checksum schedule_data
+
+let create_checkpoint 
+    ?(contacts_processed=None) 
+    ?(emails_scheduled=None) 
+    ?(emails_skipped=None) 
+    ?(error_message=None)
+    ?(completed_at=None)
+    ~run_id 
+    ~contacts 
+    ?(schedules_before=None)
+    ?(schedules_after=None)
+    ~status
+    () =
+  let now = current_datetime () in
+  let contacts_checksum = calculate_contacts_checksum contacts in
+  let schedules_before_checksum = match schedules_before with
+    | Some schedules -> Some (calculate_schedules_checksum schedules)
+    | None -> None
+  in
+  let schedules_after_checksum = match schedules_after with
+    | Some schedules -> Some (calculate_schedules_checksum schedules)
+    | None -> None
+  in
+  
+  {
+    id = 0; (* Will be set by database *)
+    run_timestamp = now;
+    scheduler_run_id = run_id;
+    contacts_checksum;
+    schedules_before_checksum;
+    schedules_after_checksum;
+    contacts_processed;
+    emails_scheduled;
+    emails_skipped;
+    status;
+    error_message;
+    completed_at;
+  }
+
+let start_checkpoint ~run_id ~contacts =
+  create_checkpoint 
+    ~run_id 
+    ~contacts 
+    ~status:"started" 
+    ()
+
+let progress_checkpoint ~run_id ~contacts ~contacts_processed ~emails_scheduled ~emails_skipped =
+  create_checkpoint 
+    ~run_id 
+    ~contacts 
+    ~contacts_processed:(Some contacts_processed)
+    ~emails_scheduled:(Some emails_scheduled)
+    ~emails_skipped:(Some emails_skipped)
+    ~status:"in_progress" 
+    ()
+
+let complete_checkpoint ~run_id ~contacts ~schedules_before ~schedules_after ~contacts_processed ~emails_scheduled ~emails_skipped =
+  let completed_at = current_datetime () in
+  create_checkpoint 
+    ~run_id 
+    ~contacts 
+    ~schedules_before:(Some schedules_before)
+    ~schedules_after:(Some schedules_after)
+    ~contacts_processed:(Some contacts_processed)
+    ~emails_scheduled:(Some emails_scheduled)
+    ~emails_skipped:(Some emails_skipped)
+    ~completed_at:(Some completed_at)
+    ~status:"completed" 
+    ()
+
+let error_checkpoint ~run_id ~contacts ~error_message =
+  let completed_at = current_datetime () in
+  create_checkpoint 
+    ~run_id 
+    ~contacts 
+    ~error_message:(Some error_message)
+    ~completed_at:(Some completed_at)
+    ~status:"error" 
+    ()
+
+let log_scheduling_event ~run_id ~event ~details =
+  let timestamp = current_datetime () in
+  Printf.printf "[%s] %s: %s - %s\n" 
+    (string_of_datetime timestamp)
+    run_id
+    event
+    details
+
+let log_error ~run_id ~error =
+  let error_message = string_of_error error in
+  log_scheduling_event ~run_id ~event:"ERROR" ~details:error_message
+
+let log_batch_progress ~run_id ~batch_num ~contacts_in_batch ~schedules_created =
+  let details = Printf.sprintf "Batch %d: %d contacts -> %d schedules" 
+    batch_num contacts_in_batch schedules_created in
+  log_scheduling_event ~run_id ~event:"BATCH_COMPLETE" ~details
+
+let log_load_balancing ~run_id ~before_count ~after_count ~distribution_variance =
+  let details = Printf.sprintf "Load balancing: %d -> %d schedules, variance: %d" 
+    before_count after_count distribution_variance in
+  log_scheduling_event ~run_id ~event:"LOAD_BALANCE" ~details
+
+let validate_scheduling_integrity ~run_id ~contacts ~final_schedules =
+  let errors = ref [] in
+  
+  let total_contacts = List.length contacts in
+  let unique_contact_ids = 
+    contacts 
+    |> List.map (fun c -> c.id) 
+    |> List.sort_uniq compare 
+    |> List.length in
+  
+  if total_contacts <> unique_contact_ids then
+    errors := "Duplicate contact IDs detected" :: !errors;
+  
+  let scheduled_contact_ids = 
+    final_schedules 
+    |> List.map (fun s -> s.contact_id) 
+    |> List.sort_uniq compare in
+  
+  let orphan_schedules = List.filter (fun contact_id ->
+    not (List.exists (fun c -> c.id = contact_id) contacts)
+  ) scheduled_contact_ids in
+  
+  if orphan_schedules <> [] then
+    let orphan_str = String.concat ", " (List.map string_of_int orphan_schedules) in
+    errors := Printf.sprintf "Orphan schedules for contacts: %s" orphan_str :: !errors;
+  
+  let invalid_dates = List.filter (fun schedule ->
+    let today = current_date () in
+    compare_date schedule.scheduled_date today < 0
+  ) final_schedules in
+  
+  if invalid_dates <> [] then
+    let count = List.length invalid_dates in
+    errors := Printf.sprintf "%d schedules have past dates" count :: !errors;
+  
+  match !errors with
+  | [] -> 
+    log_scheduling_event ~run_id ~event:"VALIDATION" ~details:"All integrity checks passed";
+    Ok ()
+  | error_list ->
+    let error_message = String.concat "; " error_list in
+    log_error ~run_id ~error:(ValidationError error_message);
+    Error (ValidationError error_message)
+
+type scheduling_metrics = {
+  total_runtime_seconds: float;
+  contacts_per_second: float;
+  schedules_per_second: float;
+  memory_usage_mb: float option;
+}
+
+let calculate_metrics ~start_time ~end_time ~contacts_processed ~schedules_created =
+  let runtime = 
+    let start_unix = Unix.mktime {
+      tm_year = start_time.date.year - 1900;
+      tm_mon = start_time.date.month - 1;
+      tm_mday = start_time.date.day;
+      tm_hour = start_time.time.hour;
+      tm_min = start_time.time.minute;
+      tm_sec = start_time.time.second;
+      tm_wday = 0; tm_yday = 0; tm_isdst = false;
+    } |> fst in
+    let end_unix = Unix.mktime {
+      tm_year = end_time.date.year - 1900;
+      tm_mon = end_time.date.month - 1;
+      tm_mday = end_time.date.day;
+      tm_hour = end_time.time.hour;
+      tm_min = end_time.time.minute;
+      tm_sec = end_time.time.second;
+      tm_wday = 0; tm_yday = 0; tm_isdst = false;
+    } |> fst in
+    end_unix -. start_unix
+  in
+  
+  let contacts_per_second = if runtime > 0.0 then 
+    float_of_int contacts_processed /. runtime 
+  else 0.0 in
+  
+  let schedules_per_second = if runtime > 0.0 then 
+    float_of_int schedules_created /. runtime 
+  else 0.0 in
+  
+  {
+    total_runtime_seconds = runtime;
+    contacts_per_second;
+    schedules_per_second;
+    memory_usage_mb = None; (* Could add Gc.stat() integration *)
+  }
+
+let log_final_metrics ~run_id ~metrics =
+  let details = Printf.sprintf 
+    "Runtime: %.2fs, Contacts/s: %.1f, Schedules/s: %.1f" 
+    metrics.total_runtime_seconds
+    metrics.contacts_per_second
+    metrics.schedules_per_second in
+  log_scheduling_event ~run_id ~event:"METRICS" ~details
