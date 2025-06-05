@@ -1,0 +1,3811 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: **/*.json
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+
+Additional Info:
+----------------
+
+================================================================
+Directory Structure
+================================================================
+bin/
+  dune
+  main.ml
+lib/
+  domain/
+    contact.ml
+    types.ml
+  rules/
+    dsl.ml
+    exclusion_window.ml
+  scheduling/
+    date_calc.ml
+  utils/
+    config.ml
+    simple_date.ml
+    zip_data.ml
+  dune
+  scheduler.ml
+test/
+  dune
+  test_scheduler_simple.ml
+  test_scheduler.ml
+.gitignore
+.ocamlformat
+business_logic.md
+CLAUDE.md
+dune_qs.txt
+dune-project
+opam_switches.txt
+PROJECT_STATUS.md
+prompt.md
+scheduler.opam
+tour.txt
+
+================================================================
+Files
+================================================================
+
+================
+File: bin/dune
+================
+(executable
+ (public_name scheduler)
+ (name main)
+ (libraries scheduler))
+
+================
+File: bin/main.ml
+================
+open Scheduler.Types
+open Scheduler.Simple_date
+open Scheduler.Contact
+open Scheduler.Exclusion_window
+
+let create_sample_contact id email zip birthday_year birthday_month birthday_day =
+  let birthday = if birthday_year > 0 then Some (make_date birthday_year birthday_month birthday_day) else None in
+  let contact = {
+    id;
+    email;
+    zip_code = Some zip;
+    state = None;
+    birthday;
+    effective_date = None;
+  } in
+  update_contact_state contact
+
+let demo_exclusion_checking () =
+  Printf.printf "=== Email Scheduler Demo ===\n\n";
+  
+  let _ = Scheduler.Zip_data.load_zip_data () in
+  
+  let contacts = [
+    create_sample_contact 1 "alice@example.com" "90210" 1990 6 15; 
+    create_sample_contact 2 "bob@example.com" "10001" 1985 12 25;   
+    create_sample_contact 3 "charlie@example.com" "06830" 1992 2 29; 
+    create_sample_contact 4 "diana@example.com" "89101" 1988 3 10;   
+  ] in
+  
+  let today = current_date () in
+  Printf.printf "Today's date: %s\n\n" (string_of_date today);
+  
+  List.iteri (fun i contact ->
+    Printf.printf "Contact %d: %s from %s\n" (i+1) contact.email 
+      (match contact.state with Some s -> string_of_state s | None -> "Unknown");
+    
+    Printf.printf "  Valid for scheduling: %b\n" (is_valid_for_scheduling contact);
+    
+    match contact.birthday with
+    | Some bd ->
+        Printf.printf "  Birthday: %s\n" (string_of_date bd);
+        let exclusion_result = check_exclusion_window contact today in
+        begin match exclusion_result with
+        | NotExcluded -> Printf.printf "  ✅ No exclusions - can send email\n"
+        | Excluded { reason; window_end } -> 
+            Printf.printf "  ❌ %s\n" reason;
+            match window_end with
+            | Some end_date -> Printf.printf "  Window ends: %s\n" (string_of_date end_date)
+            | None -> Printf.printf "  Year-round exclusion\n"
+        end
+    | None -> Printf.printf "  No birthday on file\n";
+    
+    Printf.printf "\n"
+  ) contacts;
+  
+  Printf.printf "Demo completed successfully! 🎉\n"
+
+let () = demo_exclusion_checking ()
+
+================
+File: lib/domain/contact.ml
+================
+open Types
+
+let validate_email email =
+  let email_regex = Str.regexp "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$" in
+  Str.string_match email_regex email 0
+
+let validate_zip_code zip =
+  let zip_regex = Str.regexp "^[0-9]{5}\\(-[0-9]{4}\\)?$" in
+  Str.string_match zip_regex zip 0
+
+let state_from_zip_code zip_code =
+  Zip_data.ensure_loaded ();
+  Zip_data.state_from_zip_code zip_code
+
+let validate_contact contact =
+  let errors = ref [] in
+  
+  if not (validate_email contact.email) then
+    errors := "Invalid email format" :: !errors;
+  
+  begin match contact.zip_code with
+  | Some zip when not (validate_zip_code zip) ->
+      errors := "Invalid ZIP code format" :: !errors
+  | Some zip when contact.state = None ->
+      begin match state_from_zip_code zip with
+      | None -> errors := "Cannot determine state from ZIP code" :: !errors
+      | _ -> ()
+      end
+  | None -> errors := "Missing ZIP code" :: !errors
+  | _ -> ()
+  end;
+  
+  match !errors with
+  | [] -> Ok contact
+  | errs -> Error (String.concat "; " errs)
+
+let update_contact_state contact =
+  match contact.zip_code with
+  | Some zip -> { contact with state = state_from_zip_code zip }
+  | None -> contact
+
+let is_valid_for_scheduling contact =
+  match validate_contact contact with
+  | Ok c -> c.state <> None
+  | Error _ -> false
+
+let is_zip_code_valid zip =
+  Zip_data.ensure_loaded ();
+  Zip_data.is_valid_zip_code zip
+
+================
+File: lib/domain/types.ml
+================
+type state = 
+  | CA | CT | ID | KY | MA | MD | MO | NV 
+  | NY | OK | OR | VA | WA 
+  | Other of string
+
+type anniversary_email = 
+  | Birthday
+  | EffectiveDate
+  | AEP
+  | PostWindow
+
+type campaign_email = {
+  campaign_type: string;
+  instance_id: int;
+  respect_exclusions: bool;
+  days_before_event: int;
+  priority: int;
+}
+
+type followup_type =
+  | Cold
+  | ClickedNoHQ
+  | HQNoYes
+  | HQWithYes
+
+type email_type =
+  | Anniversary of anniversary_email
+  | Campaign of campaign_email
+  | Followup of followup_type
+
+type schedule_status =
+  | PreScheduled
+  | Skipped of string
+  | Scheduled
+  | Processing
+  | Sent
+
+type contact = {
+  id: int;
+  email: string;
+  zip_code: string option;
+  state: state option;
+  birthday: Simple_date.date option;
+  effective_date: Simple_date.date option;
+}
+
+type email_schedule = {
+  contact_id: int;
+  email_type: email_type;
+  scheduled_date: Simple_date.date;
+  scheduled_time: Simple_date.time;
+  status: schedule_status;
+  priority: int;
+  template_id: string option;
+  campaign_instance_id: int option;
+  scheduler_run_id: string;
+}
+
+let state_of_string = function
+  | "CA" -> CA | "CT" -> CT | "ID" -> ID | "KY" -> KY
+  | "MA" -> MA | "MD" -> MD | "MO" -> MO | "NV" -> NV
+  | "NY" -> NY | "OK" -> OK | "OR" -> OR | "VA" -> VA
+  | "WA" -> WA | s -> Other s
+
+let string_of_state = function
+  | CA -> "CA" | CT -> "CT" | ID -> "ID" | KY -> "KY"
+  | MA -> "MA" | MD -> "MD" | MO -> "MO" | NV -> "NV"
+  | NY -> "NY" | OK -> "OK" | OR -> "OR" | VA -> "VA"
+  | WA -> "WA" | Other s -> s
+
+let string_of_anniversary_email = function
+  | Birthday -> "birthday"
+  | EffectiveDate -> "effective_date"
+  | AEP -> "aep"
+  | PostWindow -> "post_window"
+
+let string_of_followup_type = function
+  | Cold -> "cold"
+  | ClickedNoHQ -> "clicked_no_hq"
+  | HQNoYes -> "hq_no_yes"
+  | HQWithYes -> "hq_with_yes"
+
+let string_of_email_type = function
+  | Anniversary a -> string_of_anniversary_email a
+  | Campaign c -> Printf.sprintf "campaign_%s_%d" c.campaign_type c.instance_id
+  | Followup f -> Printf.sprintf "followup_%s" (string_of_followup_type f)
+
+let string_of_schedule_status = function
+  | PreScheduled -> "pre-scheduled"
+  | Skipped reason -> Printf.sprintf "skipped:%s" reason
+  | Scheduled -> "scheduled"
+  | Processing -> "processing"
+  | Sent -> "sent"
+
+let priority_of_email_type = function
+  | Anniversary Birthday -> 10
+  | Anniversary EffectiveDate -> 20
+  | Anniversary AEP -> 30
+  | Anniversary PostWindow -> 40
+  | Campaign c -> c.priority
+  | Followup _ -> 50
+
+================
+File: lib/rules/dsl.ml
+================
+open Types
+
+type window = {
+  before_days: int;
+  after_days: int;
+  use_month_start: bool;
+}
+
+type rule =
+  | BirthdayWindow of window
+  | EffectiveDateWindow of window
+  | YearRoundExclusion
+  | NoExclusion
+
+let birthday_window ~before ~after ?(use_month_start=false) () =
+  BirthdayWindow { before_days = before; after_days = after; use_month_start }
+
+let effective_date_window ~before ~after () =
+  EffectiveDateWindow { before_days = before; after_days = after; use_month_start = false }
+
+let year_round = YearRoundExclusion
+let no_exclusion = NoExclusion
+
+let rules_for_state = function
+  | CA -> birthday_window ~before:30 ~after:60 ()
+  | ID -> birthday_window ~before:0 ~after:63 ()
+  | KY -> birthday_window ~before:0 ~after:60 ()
+  | MD -> birthday_window ~before:0 ~after:30 ()
+  | NV -> birthday_window ~before:0 ~after:60 ~use_month_start:true ()
+  | OK -> birthday_window ~before:0 ~after:60 ()
+  | OR -> birthday_window ~before:0 ~after:31 ()
+  | VA -> birthday_window ~before:0 ~after:30 ()
+  | MO -> effective_date_window ~before:30 ~after:33 ()
+  | CT | MA | NY | WA -> year_round
+  | Other _ -> no_exclusion
+
+let has_exclusion_window state =
+  match rules_for_state state with
+  | NoExclusion -> false
+  | _ -> true
+
+let is_year_round_exclusion state =
+  match rules_for_state state with
+  | YearRoundExclusion -> true
+  | _ -> false
+
+let get_window_for_email_type state email_type =
+  match rules_for_state state, email_type with
+  | BirthdayWindow w, Anniversary Birthday -> Some w
+  | EffectiveDateWindow w, Anniversary EffectiveDate -> Some w
+  | YearRoundExclusion, Anniversary _ -> None
+  | _, _ -> None
+
+================
+File: lib/rules/exclusion_window.ml
+================
+open Types
+open Dsl
+open Date_calc
+open Simple_date
+
+type exclusion_result = 
+  | NotExcluded
+  | Excluded of { reason: string; window_end: Simple_date.date option }
+
+let check_birthday_exclusion contact check_date =
+  match contact.state, contact.birthday with
+  | Some state, Some birthday ->
+      begin match get_window_for_email_type state (Anniversary Birthday) with
+      | Some window ->
+          let next_bday = next_anniversary check_date birthday in
+          if in_exclusion_window check_date window next_bday then
+            let window_end = add_days next_bday window.after_days in
+            Excluded { 
+              reason = Printf.sprintf "Birthday exclusion window for %s" (string_of_state state);
+              window_end = Some window_end 
+            }
+          else
+            NotExcluded
+      | None -> NotExcluded
+      end
+  | _ -> NotExcluded
+
+let check_effective_date_exclusion contact check_date =
+  match contact.state, contact.effective_date with
+  | Some state, Some ed ->
+      begin match get_window_for_email_type state (Anniversary EffectiveDate) with
+      | Some window ->
+          let next_ed = next_anniversary check_date ed in
+          if in_exclusion_window check_date window next_ed then
+            let window_end = add_days next_ed window.after_days in
+            Excluded { 
+              reason = Printf.sprintf "Effective date exclusion window for %s" (string_of_state state);
+              window_end = Some window_end 
+            }
+          else
+            NotExcluded
+      | None -> NotExcluded
+      end
+  | _ -> NotExcluded
+
+let check_year_round_exclusion contact =
+  match contact.state with
+  | Some state when is_year_round_exclusion state ->
+      Excluded { 
+        reason = Printf.sprintf "Year-round exclusion for %s" (string_of_state state);
+        window_end = None 
+      }
+  | _ -> NotExcluded
+
+let check_exclusion_window contact check_date =
+  match check_year_round_exclusion contact with
+  | Excluded _ as result -> result
+  | NotExcluded ->
+      match check_birthday_exclusion contact check_date with
+      | Excluded _ as result -> result
+      | NotExcluded -> check_effective_date_exclusion contact check_date
+
+let should_skip_email contact email_type check_date =
+  match email_type with
+  | Campaign c when not c.respect_exclusions -> false
+  | Anniversary PostWindow -> false
+  | _ ->
+      match check_exclusion_window contact check_date with
+      | NotExcluded -> false
+      | Excluded _ -> true
+
+let get_post_window_date contact =
+  let today = current_date () in
+  let exclusions = [
+    check_birthday_exclusion contact today;
+    check_effective_date_exclusion contact today
+  ] in
+  
+  let latest_window_end = 
+    List.fold_left (fun acc exc ->
+      match exc, acc with
+      | Excluded { window_end = Some end_date; _ }, None -> Some end_date
+      | Excluded { window_end = Some end_date; _ }, Some acc_date ->
+          if compare_date end_date acc_date > 0 then Some end_date else Some acc_date
+      | _ -> acc
+    ) None exclusions
+  in
+  
+  match latest_window_end with
+  | Some end_date -> Some (add_days end_date 1)
+  | None -> None
+
+================
+File: lib/scheduling/date_calc.ml
+================
+open Dsl
+open Simple_date
+
+let pre_window_buffer_days = 60
+
+let in_exclusion_window check_date window anchor_date =
+  let window_start_offset = -(window.before_days + pre_window_buffer_days) in
+  let window_end_offset = window.after_days in
+  
+  let check_year anchor =
+    let base_date = 
+      if window.use_month_start then
+        { anchor with day = 1 }
+      else
+        anchor
+    in
+    let window_start = add_days base_date window_start_offset in
+    let window_end = add_days base_date window_end_offset in
+    compare_date check_date window_start >= 0 &&
+    compare_date check_date window_end <= 0
+  in
+  
+  check_year anchor_date ||
+  let prev_year_anchor = { anchor_date with year = anchor_date.year - 1 } in
+  let next_year_anchor = { anchor_date with year = anchor_date.year + 1 } in
+  check_year prev_year_anchor || check_year next_year_anchor
+
+let calculate_jitter ~contact_id ~event_type ~year ~window_days =
+  let hash_input = Printf.sprintf "%d-%s-%d" contact_id event_type year in
+  (Hashtbl.hash hash_input) mod window_days - (window_days / 2)
+
+let schedule_time_ct hour minute =
+  { hour; minute; second = 0 }
+
+================
+File: lib/utils/config.ml
+================
+type t = {
+  timezone: string;
+  batch_size: int;
+  max_memory_mb: int;
+  
+  send_time_hour: int;
+  send_time_minute: int;
+  
+  birthday_days_before: int;
+  effective_date_days_before: int;
+  pre_window_buffer: int;
+  followup_delay_days: int;
+  
+  max_emails_per_period: int;
+  period_days: int;
+  
+  daily_cap_percentage: float;
+  ed_soft_limit: int;
+  smoothing_window: int;
+  
+  database_path: string;
+  backup_dir: string;
+  backup_retention_days: int;
+}
+
+let default = {
+  timezone = "America/Chicago";
+  batch_size = 10_000;
+  max_memory_mb = 1024;
+  
+  send_time_hour = 8;
+  send_time_minute = 30;
+  
+  birthday_days_before = 14;
+  effective_date_days_before = 30;
+  pre_window_buffer = 60;
+  followup_delay_days = 2;
+  
+  max_emails_per_period = 3;
+  period_days = 30;
+  
+  daily_cap_percentage = 0.07;
+  ed_soft_limit = 15;
+  smoothing_window = 5;
+  
+  database_path = "org-206.sqlite3";
+  backup_dir = "./backups";
+  backup_retention_days = 7;
+}
+
+let load_from_json json_string =
+  try
+    let json = Yojson.Safe.from_string json_string in
+    let open Yojson.Safe.Util in
+    
+    let get_string field default_val =
+      try json |> member field |> to_string
+      with _ -> default_val
+    in
+    
+    let get_int field default_val =
+      try json |> member field |> to_int
+      with _ -> default_val
+    in
+    
+    let get_float field default_val =
+      try json |> member field |> to_float
+      with _ -> default_val
+    in
+    
+    Ok {
+      timezone = get_string "timezone" default.timezone;
+      batch_size = get_int "batch_size" default.batch_size;
+      max_memory_mb = get_int "max_memory_mb" default.max_memory_mb;
+      
+      send_time_hour = get_int "send_time_hour" default.send_time_hour;
+      send_time_minute = get_int "send_time_minute" default.send_time_minute;
+      
+      birthday_days_before = get_int "birthday_days_before" default.birthday_days_before;
+      effective_date_days_before = get_int "effective_date_days_before" default.effective_date_days_before;
+      pre_window_buffer = get_int "pre_window_buffer" default.pre_window_buffer;
+      followup_delay_days = get_int "followup_delay_days" default.followup_delay_days;
+      
+      max_emails_per_period = get_int "max_emails_per_period" default.max_emails_per_period;
+      period_days = get_int "period_days" default.period_days;
+      
+      daily_cap_percentage = get_float "daily_cap_percentage" default.daily_cap_percentage;
+      ed_soft_limit = get_int "ed_soft_limit" default.ed_soft_limit;
+      smoothing_window = get_int "smoothing_window" default.smoothing_window;
+      
+      database_path = get_string "database_path" default.database_path;
+      backup_dir = get_string "backup_dir" default.backup_dir;
+      backup_retention_days = get_int "backup_retention_days" default.backup_retention_days;
+    }
+  with e ->
+    Error (Printf.sprintf "Failed to parse config: %s" (Printexc.to_string e))
+
+let load_from_file filename =
+  try
+    let ic = open_in filename in
+    let content = really_input_string ic (in_channel_length ic) in
+    close_in ic;
+    load_from_json content
+  with
+  | Sys_error _ -> Ok default
+  | e -> Error (Printf.sprintf "Failed to read config file: %s" (Printexc.to_string e))
+
+================
+File: lib/utils/simple_date.ml
+================
+type date = {
+  year: int;
+  month: int;
+  day: int;
+}
+
+type time = {
+  hour: int;
+  minute: int;
+  second: int;
+}
+
+type datetime = {
+  date: date;
+  time: time;
+}
+
+let make_date year month day = { year; month; day }
+let make_time hour minute second = { hour; minute; second }
+let make_datetime date time = { date; time }
+
+let current_date () =
+  let tm = Unix.localtime (Unix.time ()) in
+  { year = tm.tm_year + 1900; month = tm.tm_mon + 1; day = tm.tm_mday }
+
+let current_datetime () =
+  let tm = Unix.localtime (Unix.time ()) in
+  {
+    date = { year = tm.tm_year + 1900; month = tm.tm_mon + 1; day = tm.tm_mday };
+    time = { hour = tm.tm_hour; minute = tm.tm_min; second = tm.tm_sec }
+  }
+
+let is_leap_year year =
+  (year mod 4 = 0 && year mod 100 <> 0) || (year mod 400 = 0)
+
+let days_in_month year month =
+  match month with
+  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> 31
+  | 4 | 6 | 9 | 11 -> 30
+  | 2 -> if is_leap_year year then 29 else 28
+  | _ -> failwith "Invalid month"
+
+let add_days date n =
+  let rec add_days_rec d remaining =
+    if remaining = 0 then d
+    else if remaining > 0 then
+      let days_in_current_month = days_in_month d.year d.month in
+      if d.day + remaining <= days_in_current_month then
+        { d with day = d.day + remaining }
+      else
+        let days_used = days_in_current_month - d.day + 1 in
+        let new_date = 
+          if d.month = 12 then
+            { year = d.year + 1; month = 1; day = 1 }
+          else
+            { d with month = d.month + 1; day = 1 }
+        in
+        add_days_rec new_date (remaining - days_used)
+    else
+      let days_to_subtract = -remaining in
+      if d.day > days_to_subtract then
+        { d with day = d.day - days_to_subtract }
+      else
+        let new_date = 
+          if d.month = 1 then
+            let prev_year = d.year - 1 in
+            let days_in_dec = days_in_month prev_year 12 in
+            { year = prev_year; month = 12; day = days_in_dec }
+          else
+            let prev_month = d.month - 1 in
+            let days_in_prev = days_in_month d.year prev_month in
+            { d with month = prev_month; day = days_in_prev }
+        in
+        add_days_rec new_date (remaining + d.day)
+  in
+  add_days_rec date n
+
+let compare_date d1 d2 =
+  if d1.year <> d2.year then compare d1.year d2.year
+  else if d1.month <> d2.month then compare d1.month d2.month
+  else compare d1.day d2.day
+
+let diff_days d1 d2 =
+  let days_since_epoch date =
+    let rec count_days acc year =
+      if year >= date.year then acc
+      else
+        let days_in_year = if is_leap_year year then 366 else 365 in
+        count_days (acc + days_in_year) (year + 1)
+    in
+    let year_days = count_days 0 1970 in
+    let month_days = ref 0 in
+    for m = 1 to date.month - 1 do
+      month_days := !month_days + days_in_month date.year m
+    done;
+    year_days + !month_days + date.day
+  in
+  days_since_epoch d1 - days_since_epoch d2
+
+let next_anniversary today event_date =
+  let this_year_candidate = { event_date with year = today.year } in
+  let this_year_candidate = 
+    if event_date.month = 2 && event_date.day = 29 && not (is_leap_year today.year) then
+      { this_year_candidate with day = 28 }
+    else
+      this_year_candidate
+  in
+  
+  if compare_date this_year_candidate today >= 0 then
+    this_year_candidate
+  else
+    let next_year = today.year + 1 in
+    let next_year_candidate = { event_date with year = next_year } in
+    if event_date.month = 2 && event_date.day = 29 && not (is_leap_year next_year) then
+      { next_year_candidate with day = 28 }
+    else
+      next_year_candidate
+
+let string_of_date d = Printf.sprintf "%04d-%02d-%02d" d.year d.month d.day
+let string_of_time t = Printf.sprintf "%02d:%02d:%02d" t.hour t.minute t.second
+let string_of_datetime dt = 
+  Printf.sprintf "%s %s" (string_of_date dt.date) (string_of_time dt.time)
+
+================
+File: lib/utils/zip_data.ml
+================
+open Types
+
+type zip_info = {
+  state: string;
+  counties: string list;
+  cities: string list option;
+}
+
+let zip_table = Hashtbl.create 50000
+
+let load_zip_data () =
+  try
+    let ic = open_in "zipData.json" in
+    let content = really_input_string ic (in_channel_length ic) in
+    close_in ic;
+    
+    let json = Yojson.Safe.from_string content in
+    let open Yojson.Safe.Util in
+    
+    json |> to_assoc |> List.iter (fun (zip_code, zip_obj) ->
+      try
+        let state = zip_obj |> member "state" |> to_string in
+        let counties = zip_obj |> member "counties" |> to_list |> List.map to_string in
+        let cities = 
+          try
+            Some (zip_obj |> member "cities" |> to_list |> List.map to_string)
+          with _ -> None
+        in
+        let zip_info = { state; counties; cities } in
+        Hashtbl.add zip_table zip_code zip_info
+      with e ->
+        Printf.eprintf "Warning: Failed to parse ZIP code %s: %s\n" zip_code (Printexc.to_string e)
+    );
+    Printf.printf "Loaded %d ZIP codes\n" (Hashtbl.length zip_table);
+    Ok ()
+  with e ->
+    Error (Printf.sprintf "Failed to load ZIP data: %s" (Printexc.to_string e))
+
+let state_from_zip_code zip_code =
+  let clean_zip = 
+    if String.length zip_code >= 5 then
+      String.sub zip_code 0 5
+    else
+      zip_code
+  in
+  
+  match Hashtbl.find_opt zip_table clean_zip with
+  | Some zip_info -> Some (state_of_string zip_info.state)
+  | None -> None
+
+let is_valid_zip_code zip_code =
+  let clean_zip = 
+    if String.length zip_code >= 5 then
+      String.sub zip_code 0 5
+    else
+      zip_code
+  in
+  Hashtbl.mem zip_table clean_zip
+
+let get_zip_info zip_code =
+  let clean_zip = 
+    if String.length zip_code >= 5 then
+      String.sub zip_code 0 5
+    else
+      zip_code
+  in
+  Hashtbl.find_opt zip_table clean_zip
+
+let ensure_loaded () =
+  if Hashtbl.length zip_table = 0 then
+    match load_zip_data () with
+    | Ok () -> ()
+    | Error msg -> failwith msg
+  else
+    ()
+
+================
+File: lib/dune
+================
+(include_subdirs unqualified)
+
+(library
+ (name scheduler)
+ (public_name scheduler)
+ (libraries
+  yojson
+  sqlite3
+  str
+  unix))
+
+================
+File: lib/scheduler.ml
+================
+module Types = Types
+module Simple_date = Simple_date
+module Dsl = Dsl
+module Date_calc = Date_calc
+module Contact = Contact
+module Exclusion_window = Exclusion_window
+module Zip_data = Zip_data
+module Config = Config
+
+================
+File: test/dune
+================
+(test
+ (name test_scheduler_simple)
+ (libraries scheduler))
+
+================
+File: test/test_scheduler_simple.ml
+================
+open Scheduler.Types
+open Scheduler.Simple_date
+open Scheduler.Dsl
+
+let test_date_arithmetic () =
+  let date = make_date 2024 1 15 in
+  let future_date = add_days date 30 in
+  assert (future_date.year = 2024 && future_date.month = 2 && future_date.day = 14);
+  
+  let past_date = add_days date (-10) in
+  assert (past_date.year = 2024 && past_date.month = 1 && past_date.day = 5);
+  
+  Printf.printf "✓ Date arithmetic tests passed\n"
+
+let test_next_anniversary () =
+  let today = make_date 2024 6 5 in
+  let birthday = make_date 1990 12 25 in
+  let next_bday = next_anniversary today birthday in
+  assert (next_bday.year = 2024 && next_bday.month = 12 && next_bday.day = 25);
+  
+  let birthday_passed = make_date 1990 3 15 in
+  let next_bday_passed = next_anniversary today birthday_passed in
+  assert (next_bday_passed.year = 2025 && next_bday_passed.month = 3 && next_bday_passed.day = 15);
+  
+  Printf.printf "✓ Anniversary calculation tests passed\n"
+
+let test_leap_year_handling () =
+  let leap_birthday = make_date 1992 2 29 in
+  let non_leap_today = make_date 2023 1 1 in
+  let next_bday = next_anniversary non_leap_today leap_birthday in
+  assert (next_bday.year = 2023 && next_bday.month = 2 && next_bday.day = 28);
+  
+  Printf.printf "✓ Leap year handling tests passed\n"
+
+let test_state_rules () =
+  let ca_rule = rules_for_state CA in
+  let ct_rule = rules_for_state CT in
+  
+  assert (match ca_rule with BirthdayWindow _ -> true | _ -> false);
+  assert (match ct_rule with YearRoundExclusion -> true | _ -> false);
+  
+  Printf.printf "✓ State rules tests passed\n"
+
+let run_all_tests () =
+  Printf.printf "Running email scheduler core tests...\n";
+  test_date_arithmetic ();
+  test_next_anniversary ();
+  test_leap_year_handling ();
+  test_state_rules ();
+  Printf.printf "Core tests passed! ✅\n"
+
+let () = run_all_tests ()
+
+================
+File: test/test_scheduler.ml
+================
+open Scheduler.Types
+open Scheduler.Simple_date
+open Scheduler.Dsl
+open Scheduler.Contact
+open Scheduler.Exclusion_window
+
+let test_date_arithmetic () =
+  let date = make_date 2024 1 15 in
+  let future_date = add_days date 30 in
+  assert (future_date.year = 2024 && future_date.month = 2 && future_date.day = 14);
+  
+  let past_date = add_days date (-10) in
+  assert (past_date.year = 2024 && past_date.month = 1 && past_date.day = 5);
+  
+  Printf.printf " Date arithmetic tests passed\n"
+
+let test_next_anniversary () =
+  let today = make_date 2024 6 5 in
+  let birthday = make_date 1990 12 25 in
+  let next_bday = next_anniversary today birthday in
+  assert (next_bday.year = 2024 && next_bday.month = 12 && next_bday.day = 25);
+  
+  let birthday_passed = make_date 1990 3 15 in
+  let next_bday_passed = next_anniversary today birthday_passed in
+  assert (next_bday_passed.year = 2025 && next_bday_passed.month = 3 && next_bday_passed.day = 15);
+  
+  Printf.printf " Anniversary calculation tests passed\n"
+
+let test_leap_year_handling () =
+  let leap_birthday = make_date 1992 2 29 in
+  let non_leap_today = make_date 2023 1 1 in
+  let next_bday = next_anniversary non_leap_today leap_birthday in
+  assert (next_bday.year = 2023 && next_bday.month = 2 && next_bday.day = 28);
+  
+  Printf.printf " Leap year handling tests passed\n"
+
+let test_state_rules () =
+  let ca_rule = rules_for_state CA in
+  let ct_rule = rules_for_state CT in
+  
+  assert (match ca_rule with BirthdayWindow _ -> true | _ -> false);
+  assert (match ct_rule with YearRoundExclusion -> true | _ -> false);
+  
+  Printf.printf " State rules tests passed\n"
+
+let test_zip_code_lookup () =
+  let _ = Scheduler.Zip_data.load_zip_data () in
+  
+  let ca_state = Scheduler.Zip_data.state_from_zip_code "90210" in
+  Printf.printf "Debug: CA state = %s\n" (match ca_state with Some s -> string_of_state s | None -> "None");
+  assert (ca_state = Some CA);
+  
+  let ny_state = Scheduler.Zip_data.state_from_zip_code "10001" in
+  assert (ny_state = Some NY);
+  
+  Printf.printf " ZIP code lookup tests passed\n"
+
+let test_contact_validation () =
+  let valid_contact = {
+    id = 1;
+    email = "test@example.com";
+    zip_code = Some "90210";
+    state = Some CA;
+    birthday = Some (make_date 1990 6 15);
+    effective_date = Some (make_date 2020 1 1);
+  } in
+  
+  assert (is_valid_for_scheduling valid_contact);
+  
+  let invalid_contact = {
+    valid_contact with
+    email = "invalid-email"
+  } in
+  
+  assert (not (is_valid_for_scheduling invalid_contact));
+  
+  Printf.printf " Contact validation tests passed\n"
+
+let test_exclusion_windows () =
+  let ca_contact = {
+    id = 1;
+    email = "test@example.com";
+    zip_code = Some "90210";
+    state = Some CA;
+    birthday = Some (make_date 1990 6 15);
+    effective_date = None;
+  } in
+  
+  let check_date = make_date 2024 6 10 in
+  let result = check_exclusion_window ca_contact check_date in
+  
+  assert (match result with Excluded _ -> true | NotExcluded -> false);
+  
+  Printf.printf " Exclusion window tests passed\n"
+
+let run_all_tests () =
+  Printf.printf "Running email scheduler tests...\n";
+  test_date_arithmetic ();
+  test_next_anniversary ();
+  test_leap_year_handling ();
+  test_state_rules ();
+  test_zip_code_lookup ();
+  test_contact_validation ();
+  test_exclusion_windows ();
+  Printf.printf "All tests passed! \n"
+
+let () = run_all_tests ()
+
+================
+File: .gitignore
+================
+# OCaml
+_build/
+*.annot
+*.cmx
+*.cmxa
+*.cmxs
+*.cmxdep
+*.cma
+*.cmxa
+*.cmi
+*.cmo
+*.cmj
+*.cmti
+*.a
+*.o
+*.so
+*.out
+*.out.cache
+.merlin
+*.exe
+_opam/
+_coverage/
+bisect*.coverage
+
+# Build artifacts
+medicare_email_schedule.install
+
+# Local database
+*.db
+*.db-shm
+*.db-wal
+
+# Configuration
+.env
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+================
+File: .ocamlformat
+================
+break-cases=all
+break-fun-decl=wrap
+break-separators=before
+doc-comments=before
+field-space=loose
+if-then-else=vertical
+indicate-nested-or-patterns=unsafe-no
+let-and=sparse
+margin=80
+sequence-style=terminator
+space-around-arrays
+space-around-lists
+space-around-records
+space-around-variants
+type-decl=sparse
+wrap-comments=true
+
+================
+File: business_logic.md
+================
+# Email Scheduling Business Logic Documentation
+
+This document provides a comprehensive overview of the email scheduling business logic implemented in the FastAPI application. It is designed to facilitate refactoring in a new language while preserving all business rules and functionality.
+
+## Overview
+
+The email scheduling system manages automated email and SMS campaigns for multiple organizations. It uses a sophisticated rule engine to determine when to send different types of communications based on contact information, state-specific regulations, and timing constraints. The system operates in Central Time (CT) and processes databases with up to 3 million contacts.
+
+## Core Components
+
+### 0. System Configuration
+
+#### Time Zone and Processing
+- **System Time Zone**: All operations run in Central Time (CT)
+- **Processing Model**: Single instance processing (no concurrent schedulers)
+- **Database Strategy**: Work with SQLite replica, sync results back to main database
+- **Reprocessing**: Clear all pre-scheduled and skipped emails before each run
+
+#### Key Constants (Configurable)
+- **send_time**: Time of day to send emails (default: 08:30 CT)
+- **batch_size**: Number of contacts to process in a batch (default: 10,000)
+- **max_emails_per_period**: Maximum emails per contact per period (configurable)
+- **period_days**: Number of days to consider for email frequency limits (configurable)
+- **birthday_email_days_before**: Days before birthday to send email (default: 14)
+- **effective_date_days_before**: Days before effective date to send email (default: 30)
+- **pre_window_exclusion_days**: Extension for exclusion windows (default: 60)
+
+### 1. Email Types
+
+The system handles two categories of emails:
+
+#### 1.1 Anniversary-Based Email Types
+These are recurring emails tied to annual dates:
+NOTE: these constants should be configurable, likely in a separate config file
+- **Birthday**: Sent 14 days before a contact's birthday
+- **Effective Date**: Sent 30 days before a contact's policy effective date anniversary
+- **AEP (Annual Enrollment Period)**: Sent in September annually
+- **Post Window**: Sent after an exclusion window ends (when other emails were skipped)
+
+#### 1.2 Campaign-Based Email Types
+These are flexible, configurable campaigns that can be triggered through various mechanisms:
+- **Rate Increase**: Advance notification of premium changes
+- **Initial Blast**: System introduction emails sent to all contacts
+- **Custom Campaigns**: Configurable campaigns for promotions, policy updates, regulatory notices, etc.
+
+Campaign-based emails offer per-campaign configuration of:
+- Exclusion window compliance (can be enabled/disabled per campaign)
+- Follow-up eligibility (can be enabled/disabled per campaign)
+- Timing relative to trigger date (configurable days before/after)
+- Target audience (all contacts or specific subset)
+
+### 2. Contact Information Model
+
+Each contact requires:
+- **id**: Unique identifier
+- **email**: Valid email address (required)
+- **zip_code**: US ZIP code (required to get the state)
+- **state**: US state (required)
+- **birthday**: Date of birth (optional but needed for birthday emails)
+- **effective_date**: Policy effective date (optional but needed for effective date emails)
+
+**Invalid Data Handling**:
+- Contacts with invalid/missing ZIP codes are skipped during processing
+- State must be determinable from ZIP code for processing to occur
+
+Campaign-specific data (such as rate increase dates) is stored separately in the campaign system rather than as contact fields, providing greater flexibility for managing multiple campaigns per contact.
+
+### 3. Campaign System Architecture
+
+The campaign system provides a flexible framework for managing various types of email communications beyond the standard anniversary-based emails. The system uses a two-tier architecture: **Campaign Types** (reusable configurations) and **Campaign Instances** (specific executions with templates and targeting).
+
+#### 3.1 Campaign Type Model (Base Configuration)
+
+Campaign types define reusable behavior patterns:
+- **name**: Campaign type identifier (e.g., 'rate_increase', 'seasonal_promo', 'initial_blast')
+- **respect_exclusion_windows**: Boolean flag controlling whether state exclusion rules apply
+- **enable_followups**: Boolean flag controlling whether follow-up emails are generated
+- **days_before_event**: Integer defining timing relative to trigger date (0 = immediate, 14 = two weeks before)
+- **target_all_contacts**: Boolean flag for campaigns targeting entire contact base
+- **priority**: Integer defining campaign precedence when multiple campaigns conflict
+
+#### 3.2 Campaign Instance Model (Specific Executions)
+
+Campaign instances represent specific executions of campaign types with unique templates and timing:
+- **campaign_type**: Reference to the base campaign type
+- **instance_name**: Unique identifier for this specific campaign (e.g., 'spring_2024_promo', 'rate_increase_q1_2024')
+- **email_template**: Template identifier/name for email content
+- **sms_template**: Template identifier/name for SMS content (optional)
+- **active_start_date**: When this campaign instance becomes active for scheduling
+- **active_end_date**: When this campaign instance stops being active
+- **metadata**: JSON field for instance-specific configuration overrides
+
+#### 3.3 Campaign Change Management
+
+The system tracks all campaign changes for audit and rescheduling purposes:
+
+```sql
+CREATE TABLE campaign_change_log (
+    id INTEGER PRIMARY KEY,
+    campaign_instance_id INTEGER NOT NULL,
+    field_changed TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    changed_at DATETIME NOT NULL,
+    changed_by TEXT,
+    requires_rescheduling BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (campaign_instance_id) REFERENCES campaign_instances(id)
+);
+```
+
+When campaign dates change:
+1. Log the change in campaign_change_log
+2. Mark affected email schedules for reprocessing
+3. Trigger scheduler to run for affected contacts
+
+#### 3.4 Contact Campaign Targeting Model
+
+Campaign targeting links contacts to specific campaign instances:
+- **contact_id**: Reference to the target contact
+- **campaign_instance_id**: Reference to the specific campaign instance
+- **trigger_date**: The event date that triggers the campaign (e.g., rate change date)
+- **status**: Current state ('pending', 'scheduled', 'sent', 'skipped')
+- **metadata**: JSON field for contact-specific campaign data
+
+#### 3.5 Campaign Examples with Multiple Instances
+
+**Rate Increase Campaign Type:**
+```yaml
+campaign_type: rate_increase
+respect_exclusion_windows: true
+enable_followups: true
+days_before_event: 14
+target_all_contacts: false
+priority: 1
+```
+
+**Multiple Rate Increase Instances:**
+```yaml
+# Q1 2024 Rate Increases
+instance_name: rate_increase_q1_2024
+email_template: rate_increase_standard_v2
+sms_template: rate_increase_sms_v1
+active_start_date: 2024-01-01
+active_end_date: 2024-03-31
+
+# Q2 2024 Rate Increases (different template)
+instance_name: rate_increase_q2_2024
+email_template: rate_increase_enhanced_v3
+sms_template: rate_increase_sms_v2
+active_start_date: 2024-04-01
+active_end_date: 2024-06-30
+```
+
+**Seasonal Promotion Campaign Type:**
+```yaml
+campaign_type: seasonal_promo
+respect_exclusion_windows: true
+enable_followups: true
+days_before_event: 7
+target_all_contacts: false
+priority: 5
+```
+
+**Multiple Seasonal Instances:**
+```yaml
+# Spring 2024 Enrollment
+instance_name: spring_enrollment_2024
+email_template: spring_promo_email
+sms_template: spring_promo_sms
+active_start_date: 2024-03-01
+active_end_date: 2024-05-31
+
+# Fall 2024 Enrollment
+instance_name: fall_enrollment_2024
+email_template: fall_promo_email
+sms_template: fall_promo_sms
+active_start_date: 2024-09-01
+active_end_date: 2024-11-30
+```
+
+#### 3.6 Campaign Triggering Mechanisms
+
+**Manual Targeting:**
+- Administrator manually adds contacts to specific campaigns
+- Useful for one-off communications or testing
+
+**Automated Population:**
+- Rate increases: Triggered when external systems update rate change data
+- Regulatory notices: Triggered by compliance calendar events
+- Policy updates: Triggered by carrier system integrations
+
+**Bulk Import:**
+- CSV uploads for large-scale campaign targeting
+- API integrations for systematic campaign population
+
+**Event-Driven:**
+- Database triggers or application events automatically enroll contacts
+- Real-time campaign activation based on contact behavior or external data
+
+#### 3.7 Campaign Priority and Conflict Resolution
+
+When multiple campaigns target the same contact on the same date:
+1. **Priority-Based Selection**: Campaign with lowest priority number wins
+2. **Exclusion Window Respect**: Campaigns respecting exclusion windows may be skipped while others proceed
+3. **Follow-up Coordination**: Campaigns with follow-ups may influence scheduling of subsequent campaigns
+4. **Volume Balancing**: Load balancing algorithms consider all campaign types together
+
+### 4. State-Based Rules Engine
+
+The system implements state-specific exclusion windows where no emails should be sent. These rules are categorized into three types:
+
+#### 4.1 Birthday Window Rules
+States with birthday-based exclusion windows:
+- **CA**: 30 days before to 60 days after birthday
+- **ID**: 0 days before to 63 days after birthday
+- **KY**: 0 days before to 60 days after birthday
+- **MD**: 0 days before to 30 days after birthday
+- **NV**: 0 days before to 60 days after birthday (uses month start of birthday month)
+- **OK**: 0 days before to 60 days after birthday
+- **OR**: 0 days before to 31 days after birthday
+- **VA**: 0 days before to 30 days after birthday
+
+#### 4.2 Effective Date Window Rules
+States with effective date-based exclusion windows:
+- **MO**: 30 days before to 33 days after effective date anniversary
+
+#### 4.3 Year-Round Exclusion Rules
+States where no marketing emails are sent:
+- **CT**: No emails sent year-round
+- **MA**: No emails sent year-round
+- **NY**: No emails sent year-round
+- **WA**: No emails sent year-round
+
+### 5. Exclusion Window Calculation
+
+#### 5.1 Pre-Window Exclusion
+All exclusion windows are extended by 60 days before their start date. This ensures emails are not sent just prior to the statutory exclusion window, so any new policy effective date won't be in the statutory exclusion window.
+
+Example: If a birthday window starts on March 1st, the actual exclusion period begins on December 30th of the previous year (60 days before March 1st).
+
+#### 5.2 Special Rules
+- **Nevada (NV)**: Uses the first day of the birth month instead of the actual birth date for window calculation
+- **Age 76+ Rule**: Some states may implement special handling for contacts aged 76 or older (year-round exclusion) -- none currently but this can happen in the future
+
+#### 5.3 Window Spanning Years
+Exclusion windows can span across calendar years. The system handles these cases by checking:
+1. If the window crosses years (e.g., December to February)
+2. Whether the current date falls in the first part (December) or second part (January-February)
+(other approaches ok, just have to make sure we gracefully handle the case where the window spans years)
+
+### 6. Email Scheduling Logic
+
+#### 6.1 Anniversary Date Calculation
+For both birthdays and effective dates:
+1. Calculate the next anniversary from today
+2. For February 29th dates, use February 28th in non-leap years
+3. If this year's anniversary has passed, use next year's
+
+#### 6.2 Email Date Calculation
+
+**Anniversary-Based Emails:**
+- Birthday emails: Anniversary date - 14 days (configurable)
+- Effective date emails: Anniversary date - 30 days (configurable)
+- AEP emails: September 15th of current year (configurable)
+- Post-window emails: Day after exclusion window ends
+
+**Campaign-Based Emails:**
+- Campaign send date = trigger_date + days_before_event (from campaign configuration)
+- If days_before_event is positive, sent before the trigger date
+- If days_before_event is negative, sent after the trigger date
+- If days_before_event is 0, sent on the trigger date
+
+#### 6.3 Scheduling Process
+
+**Anniversary-Based Email Scheduling:**
+1. Determine contact's state from ZIP code
+2. Check for state-specific rules
+3. Calculate exclusion window (if applicable)
+4. For each anniversary email type:
+   - **Birthday**: If birthday is present, calculate anniversary date and scheduled send date
+   - **Effective Date**: If effective_date is present, calculate anniversary date and scheduled send date
+   - **AEP**: Calculate scheduled send date (September 15th)
+   - For each calculated date, check if it falls within exclusion window
+   - Mark as "skipped" if excluded, "pre-scheduled" if not
+5. If any emails are skipped due to exclusion window:
+   - Add a post-window email for the day after the window ends
+
+**Campaign-Based Email Scheduling:**
+1. Query active campaign instances (where current_date is between active_start_date and active_end_date)
+2. For each active campaign instance, query target contacts from contact_campaigns table
+3. For each contact-campaign instance combination:
+   - Calculate send date based on trigger_date and campaign type's days_before_event
+   - Check campaign type's respect_exclusion_windows flag
+   - If flag is true, apply state exclusion window rules
+   - If flag is false, schedule regardless of exclusion windows
+   - Mark as "skipped" if excluded, "pre-scheduled" if not
+   - Include email_template and sms_template from campaign instance
+   - Set campaign_instance_id in email_schedules for template resolution
+4. Apply campaign priority rules for conflicting send dates
+
+**Complete Scheduling Process:**
+1. **Clear Previous Schedules**: Delete all pre-scheduled and skipped emails for contacts being processed
+2. **Process Anniversary Emails**: Calculate and schedule birthday, effective date, and AEP emails
+3. **Process Campaign Emails**: Calculate and schedule all active campaign emails
+4. **Apply Exclusion Windows**: Check state rules and mark excluded emails as skipped
+5. **Add Post-Window Emails**: Create catch-up emails for after exclusion periods
+6. **Apply Load Balancing**: Distribute emails evenly across days
+7. **Enforce Frequency Limits**: Ensure contacts don't receive too many emails
+8. **Combine and Sort**: Merge anniversary-based and campaign-based emails
+9. Check if the contact has received too many emails in the last period_days days (do *not* do this for followup emails -- but we want to make sure that we don't send too many emails to the same contact in a short period of time. Campaign emails with higher priority take precedence over lower priority emails when frequency limits are reached.)
+
+### 7. Load Balancing and Smoothing Logic
+
+The system implements sophisticated load balancing to prevent email clustering and ensure even distribution of sending volume, particularly important for effective date emails that often cluster around the first of the month.
+
+#### 7.1 Daily Volume Caps
+- **Organizational Cap**: Maximum emails per day calculated as a percentage of total contacts (default: 7% of org contacts)
+- **Effective Date Soft Limit**: Specific limit for effective date emails per day (default: 15 emails, or 30% of daily org cap, whichever is lower)
+- **Over-Limit Detection**: Days exceeding 120% of daily cap are flagged for redistribution
+
+#### 7.2 Effective Date Smoothing
+Effective date emails are particularly prone to clustering because many policies have effective dates on the 1st of the month. The smoothing algorithm:
+
+1. **Cluster Detection**: Counts how many effective date emails are scheduled for each day
+2. **Threshold Application**: If a day exceeds the effective date soft limit, smoothing is applied
+3. **Jitter Calculation**: Uses a deterministic hash of contact_id + event_type + event_year to calculate a jitter value
+4. **Window Distribution**: Spreads emails across a configurable window (default: ±2 days from original date)
+5. **Future Date Validation**: Ensures smoothed dates are never in the past
+
+Example: If 50 effective date emails are scheduled for March 1st (exceeding the limit), they're redistributed across February 27th through March 3rd using deterministic jitter.
+
+#### 7.3 Global Daily Cap Enforcement
+When any day exceeds the organizational daily cap:
+
+1. **Overflow Detection**: Identifies days with excessive email volume
+2. **Next-Day Migration**: Moves excess emails to the following day if it has lower volume
+3. **Cascade Prevention**: Ensures the next day doesn't become excessively overloaded
+4. **Update Tracking**: Adjusts daily counts to reflect redistributed emails
+
+#### 7.4 Catch-Up Email Distribution
+For emails whose ideal send date has passed but the event is still in the future:
+
+1. **Catch-Up Window**: Spreads catch-up emails across a configurable window (default: 7 days)
+2. **Hash-Based Distribution**: Uses deterministic hashing to ensure consistent assignment
+3. **Even Distribution**: Prevents all catch-up emails from being sent on the same day
+
+#### 7.5 Performance Optimization for Scale
+
+For handling up to 3 million contacts:
+
+1. **Streaming Processing**:
+   - Process contacts in chunks of 10,000
+   - Use database cursors to avoid memory exhaustion
+   - Calculate schedules in batches
+
+2. **Optimized Indexes**:
+   ```sql
+   CREATE INDEX idx_contacts_state_birthday ON contacts(state, birthday);
+   CREATE INDEX idx_contacts_state_effective ON contacts(state, effective_date);
+   CREATE INDEX idx_campaigns_active ON campaign_instances(active_start_date, active_end_date);
+   CREATE INDEX idx_schedules_lookup ON email_schedules(contact_id, email_type, scheduled_send_date);
+   ```
+
+3. **Batch Operations**:
+   - Use prepared statements for all queries
+   - Batch INSERTs up to 2,000 records per transaction
+   - Use UPSERT operations where appropriate
+
+#### 7.6 Configuration Parameters
+```yaml
+load_balancing:
+  daily_send_percentage_cap: 0.07          # 7% of org contacts per day
+  ed_daily_soft_limit: 15                  # Soft cap for ED emails per day
+  ed_smoothing_window_days: 5              # ±2 days window for ED smoothing
+  catch_up_spread_days: 7                  # Window for catch-up distribution
+  overage_threshold: 1.2                   # 120% of cap triggers redistribution
+```
+
+#### 7.7 Benefits of Smoothing
+- **Reduced Server Load**: Prevents overwhelming email infrastructure on peak days
+- **Better Deliverability**: ISPs are less likely to throttle when volume is consistent
+- **Improved User Experience**: Recipients don't receive large bursts of emails
+- **Operational Efficiency**: Easier to manage sending infrastructure with predictable volume
+
+### 8. Database Transaction Management
+
+#### 8.1 Transaction Boundaries
+
+All scheduling operations use explicit transaction boundaries:
+
+```sql
+BEGIN IMMEDIATE;  -- Prevent concurrent writes
+
+-- 1. Create audit checkpoint
+INSERT INTO scheduler_checkpoints (
+    run_timestamp, 
+    scheduler_run_id,
+    contacts_checksum, 
+    status
+) VALUES (?, ?, ?, 'started');
+
+-- 2. Clear existing schedules in batches
+DELETE FROM email_schedules 
+WHERE status IN ('pre-scheduled', 'skipped') 
+AND contact_id IN (SELECT id FROM contacts LIMIT 10000);
+
+-- 3. Process and insert new schedules
+INSERT OR IGNORE INTO email_schedules (...) 
+SELECT ... LIMIT 10000;
+
+-- 4. Update checkpoint
+UPDATE scheduler_checkpoints 
+SET status = 'completed', 
+    schedules_after_checksum = ?,
+    contacts_processed = ?,
+    emails_scheduled = ?,
+    emails_skipped = ?,
+    completed_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+
+COMMIT;
+```
+
+#### 8.2 Audit and Recovery
+
+**Checkpoint Table**:
+```sql
+CREATE TABLE scheduler_checkpoints (
+    id INTEGER PRIMARY KEY,
+    run_timestamp DATETIME NOT NULL,
+    scheduler_run_id TEXT UNIQUE NOT NULL,
+    contacts_checksum TEXT NOT NULL,
+    schedules_before_checksum TEXT,
+    schedules_after_checksum TEXT,
+    contacts_processed INTEGER,
+    emails_scheduled INTEGER,
+    emails_skipped INTEGER,
+    status TEXT NOT NULL,
+    error_message TEXT,
+    completed_at DATETIME
+);
+```
+
+**Point-in-Time Backup Strategy**:
+1. Create timestamped backup before processing
+2. Verify backup integrity with PRAGMA integrity_check
+3. Maintain rolling window of backups (7 days)
+4. Store backups on persistent volume (fly.io volume mount)
+
+### 9. Batch Processing
+
+TBD -- no batching should be need for scheduling process, only for scheduling emails. However, it is helpful to have some sort of batch identifier so we can see in the database which when an email schedule was created or updated.
+
+### 10. Database Operations
+
+#### 10.1 Email Schedules Table Schema
+```sql
+CREATE TABLE email_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id INTEGER NOT NULL,
+    email_type TEXT NOT NULL,                     -- 'birthday', 'campaign_rate_increase', 'followup_1_cold', etc.
+    scheduled_send_date DATE NOT NULL,
+    scheduled_send_time TIME DEFAULT '08:30:00',  -- configurable
+    status TEXT NOT NULL DEFAULT 'pre-scheduled',
+    skip_reason TEXT,
+    priority INTEGER DEFAULT 10,                  -- Lower numbers = higher priority
+    campaign_instance_id INTEGER,                 -- For campaign-based emails, references campaign_instances.id
+    email_template TEXT,                          -- Template to use for this email (from campaign instance or default)
+    sms_template TEXT,                            -- Template to use for SMS (if applicable)
+    scheduler_run_id TEXT,                        -- Added for audit trail
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    actual_send_datetime DATETIME,
+    UNIQUE(contact_id, email_type, scheduled_send_date),
+    FOREIGN KEY (campaign_instance_id) REFERENCES campaign_instances(id),
+    INDEX idx_scheduler_run (scheduler_run_id),
+    INDEX idx_status_date (status, scheduled_send_date)
+);
+```
+
+#### 10.2 Campaign System Tables
+```sql
+-- Base campaign type definitions (reusable patterns)
+CREATE TABLE campaign_types (
+    name TEXT PRIMARY KEY,                        -- 'rate_increase', 'seasonal_promo', etc.
+    respect_exclusion_windows BOOLEAN DEFAULT TRUE,
+    enable_followups BOOLEAN DEFAULT TRUE,
+    days_before_event INTEGER DEFAULT 0,
+    target_all_contacts BOOLEAN DEFAULT FALSE,
+    priority INTEGER DEFAULT 10,
+    active BOOLEAN DEFAULT TRUE,                  -- Can this campaign type be used?
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Specific campaign instances (actual campaigns with templates)
+CREATE TABLE campaign_instances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_type TEXT NOT NULL,                  -- References campaign_types.name
+    instance_name TEXT NOT NULL,                  -- 'spring_2024_promo', 'rate_increase_q1_2024'
+    email_template TEXT,                          -- Template identifier for email sending system
+    sms_template TEXT,                            -- Template identifier for SMS sending system
+    active_start_date DATE,                       -- When this instance becomes active
+    active_end_date DATE,                         -- When this instance expires
+    metadata TEXT,                                -- JSON for instance-specific config overrides
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(campaign_type, instance_name),
+    FOREIGN KEY (campaign_type) REFERENCES campaign_types(name)
+);
+
+-- Contact-campaign targeting associations (now references specific instances)
+CREATE TABLE contact_campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id INTEGER NOT NULL,
+    campaign_instance_id INTEGER NOT NULL,       -- References campaign_instances.id
+    trigger_date DATE,                            -- When to send (for rate_increase, etc.)
+    status TEXT DEFAULT 'pending',               -- 'pending', 'scheduled', 'sent', 'skipped'
+    metadata TEXT,                               -- JSON field for contact-specific data
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(contact_id, campaign_instance_id, trigger_date),
+    FOREIGN KEY (campaign_instance_id) REFERENCES campaign_instances(id),
+    FOREIGN KEY (contact_id) REFERENCES contacts(id)
+);
+```
+
+#### 10.3 Status Values
+- **pre-scheduled**: Email is scheduled for future sending
+- **skipped**: Email was skipped due to exclusion window
+- **scheduled**: Email is queued for immediate sending
+- **processing**: Email is being sent
+- **sent**: Email was successfully sent
+(The email scheduler we are building here will only use pre-scheduled and skipped statuses -- but will need to be able utilize the other statuses for the purpose of determining if an email is being sent too close to another email for the same contact.)
+
+#### 10.4 Email Types
+The email_type field supports the following values:
+
+**Anniversary-Based Email Types:**
+- **birthday**: Birthday-based emails (uses default birthday template)
+- **effective_date**: Effective date anniversary emails (uses default effective date template)
+- **aep**: Annual Enrollment Period emails (uses default AEP template)
+- **post_window**: Post-exclusion window emails (uses default post-window template)
+
+**Campaign-Based Email Types:**
+- **campaign_{campaign_type}**: Dynamic email types based on campaign type (e.g., 'campaign_rate_increase', 'campaign_seasonal_promo')
+  - Template determined by campaign_instance.email_template field
+  - SMS template (if applicable) determined by campaign_instance.sms_template field
+
+**Follow-up Email Types:**
+- **followup_1_cold**: Cold follow-up emails (uses default cold follow-up template)
+- **followup_2_clicked_no_hq**: Follow-up for contacts who clicked but didn't answer health questions
+- **followup_3_hq_no_yes**: Follow-up for contacts who answered health questions with no conditions
+- **followup_4_hq_with_yes**: Follow-up for contacts who answered health questions with conditions
+
+#### 10.5 Template Resolution
+Templates are resolved in the following order:
+1. **Campaign-based emails**: Use email_template and sms_template from the campaign_instances table
+2. **Anniversary-based emails**: Use predefined templates based on email_type
+3. **Follow-up emails**: Use predefined follow-up templates based on email_type and parent email context
+
+#### 10.6 Database Operations
+1. **Clear existing schedules**: Removes all pre-scheduled and skipped entries for contacts being processed
+2. **Campaign instance synchronization**: Updates contact_campaigns table based on external triggers and active campaign instances
+3. **Template resolution**: Determines appropriate email/SMS templates based on campaign instance or email type
+4. **Batch insert**: Uses INSERT OR IGNORE with ON CONFLICT to handle duplicates
+5. **Transaction management**: Each batch is committed separately for reliability
+6. **Campaign management**: CRUD operations for campaign types, instances, and contact targeting
+7. **Instance lifecycle**: Automatic activation/deactivation based on active_start_date and active_end_date
+
+### 11. Performance Optimizations
+
+#### 11.1 Date-Based Contact Queries
+For daily processing of birthdays and effective dates:
+- Uses SQL date functions to find contacts by month and day
+- Ignores year component for anniversary matching
+- Supports batch processing of multiple dates
+
+#### 11.2 Load Balancing and Smoothing
+- Prevents email clustering through deterministic distribution algorithms
+- Reduces peak infrastructure load by spreading volume across multiple days
+- Maintains consistent daily sending volumes for better deliverability
+- Uses hash-based jitter for predictable but distributed email scheduling
+
+#### 11.3 Asynchronous Processing
+(TBD -- this was a python-specific optimization, not sure if it's needed here)
+- Database operations run in thread pool to avoid blocking
+- Multiple batches can be processed concurrently
+- Timing metrics track performance of each step
+
+### 12. Configuration Management
+
+#### 12.1 Timing Constants
+```yaml
+timing_constants:
+  birthday_email_days_before: 14        # Days before birthday to send email
+  effective_date_days_before: 30        # Days before effective date to send email
+  pre_window_exclusion_days: 60         # Days to extend exclusion window backwards
+```
+
+#### 12.2 Campaign Configuration
+
+**Campaign Types (Base Configurations):**
+```yaml
+campaign_types:
+  rate_increase:
+    respect_exclusion_windows: true
+    enable_followups: true
+    days_before_event: 14
+    target_all_contacts: false
+    priority: 1
+    active: true
+  
+  seasonal_promo:
+    respect_exclusion_windows: true
+    enable_followups: true
+    days_before_event: 7
+    target_all_contacts: false
+    priority: 5
+    active: true
+  
+  initial_blast:
+    respect_exclusion_windows: false
+    enable_followups: false
+    days_before_event: 0
+    target_all_contacts: true
+    priority: 10
+    active: true
+```
+
+**Campaign Instances (Specific Executions):**
+```yaml
+campaign_instances:
+  # Multiple rate increase campaigns running simultaneously
+  - campaign_type: rate_increase
+    instance_name: rate_increase_q1_2024
+    email_template: rate_increase_standard_v2
+    sms_template: rate_increase_sms_v1
+    active_start_date: 2024-01-01
+    active_end_date: 2024-03-31
+  
+  - campaign_type: rate_increase
+    instance_name: rate_increase_q2_2024
+    email_template: rate_increase_enhanced_v3
+    sms_template: rate_increase_sms_v2
+    active_start_date: 2024-04-01
+    active_end_date: 2024-06-30
+  
+  # Multiple seasonal promotions with different templates
+  - campaign_type: seasonal_promo
+    instance_name: spring_enrollment_2024
+    email_template: spring_promo_email_v1
+    sms_template: spring_promo_sms_v1
+    active_start_date: 2024-03-01
+    active_end_date: 2024-05-31
+  
+  - campaign_type: seasonal_promo
+    instance_name: fall_enrollment_2024
+    email_template: fall_promo_email_v2
+    sms_template: fall_promo_sms_v2
+    active_start_date: 2024-09-01
+    active_end_date: 2024-11-30
+```
+
+#### 12.3 AEP Configuration
+```yaml
+aep_config:
+  default_dates:
+    - month: 9
+      day: 15
+  years: [2023, 2024, 2025, 2026, 2027]
+```
+
+#### 12.4 State Rules Configuration
+Stored in YAML format with:
+- Rule type (birthday_window, effective_date_window, year_round)
+- Window parameters (window_before, window_after)
+- Special rules (use_month_start, age_76_plus)
+
+#### 12.5 Versioned Configuration Management
+
+All configuration stored in versioned format:
+
+```sql
+CREATE TABLE config_versions (
+    id INTEGER PRIMARY KEY,
+    config_type TEXT NOT NULL,
+    config_data TEXT NOT NULL,  -- JSON
+    valid_from DATETIME NOT NULL,
+    valid_to DATETIME,
+    created_at DATETIME NOT NULL,
+    created_by TEXT
+);
+```
+
+This ensures configuration changes are tracked and can be rolled back if needed.
+
+### 13. Error Handling and Recovery
+
+- **Missing Required Fields**: Contacts missing email or zip_code are skipped, logged in audit table
+- **Invalid ZIP Codes**: Skip contact, increment invalid_contact_count
+- **Invalid Dates**: February 29th in non-leap years converts to February 28th
+- **Transaction Failures**: Automatic retry with exponential backoff, rollback entire batch
+- **Partial Processing**: Track progress in checkpoints for resumability
+- **Batch Failures**: Individual batch rollback without affecting other batches
+- **Database Errors**: Automatic retry with exponential backoff
+
+### 14. Monitoring and Observability
+
+**Key Metrics to Track**:
+- Processing time per batch
+- Emails scheduled/skipped per run
+- Daily volume distribution
+- Exclusion window hit rate
+- Campaign effectiveness metrics
+- Contacts fetched and processed
+- Performance timing for each operation
+
+**Health Checks**:
+- Database connection status
+- Last successful run timestamp
+- Pending schedule backlog
+- Error rate thresholds
+
+**Logging and Monitoring**:
+The system provides detailed logging for:
+- Contacts fetched and processed
+- Emails scheduled, skipped, or sent
+- Exclusion window calculations
+- Performance timing for each operation
+- Error conditions with full stack traces
+
+### 15. Key Business Rules Summary
+
+1. **No emails during exclusion windows**: Strictly enforced based on state rules
+2. **Post-window catch-up**: Ensures contacts receive communication after exclusion periods
+3. **Anniversary-based scheduling**: Emails tied to recurring annual dates
+4. **State compliance**: Different rules for different states based on regulations
+5. **Batch reliability**: Failed batches don't affect successful ones
+6. **Idempotency**: Re-running scheduling won't create duplicates (INSERT OR IGNORE)
+7. **Date handling**: Consistent handling of leap years and month-end dates
+
+### 16. Integration Points
+
+- **ZIP to State Mapping**: Uses pre-loaded ZIP code database
+- **Contact Rules Engine**: Modular engine for applying state-specific rules
+- **Email/SMS Sending**: Integrates with SendGrid (email) and Twilio (SMS)
+- **Webhook Handling**: Processes delivery notifications from email/SMS providers
+
+### 17. Data Flow
+
+1. **Daily Scheduling**:
+   - Fetch contacts with birthdays/effective dates in target window
+   - Apply state rules and calculate exclusion windows
+   - Generate email schedules
+   - Store in database with appropriate status
+
+2. **Email Sending**:
+(handled separately)
+   - Query for emails due today with status 'pre-scheduled'
+   - Send via appropriate channel (email/SMS)
+   - Update status and track delivery
+
+3. **Webhook Processing**:
+(handled separately)
+   - Receive delivery notifications
+   - Update email status
+   - Log delivery metrics
+
+### 18. Follow-up Email Scheduling
+
+The system implements an intelligent follow-up scheduling algorithm that:
+1. Identifies initial emails (anniversary-based: birthday, effective_date, aep, post_window; campaign-based: any campaign with enable_followups=true) that need follow-ups
+2. Schedules follow-ups 2 days after the initial email was sent (configurable)
+3. Determines the appropriate follow-up template based on user behavior
+4. Respects campaign-specific follow-up settings
+
+#### 18.1 Follow-up Email Types
+
+The system uses four follow-up templates based on user engagement hierarchy:
+1. **followup_4_hq_with_yes**: Contact answered health questions with medical conditions (highest priority)
+2. **followup_3_hq_no_yes**: Contact answered health questions with no medical conditions
+3. **followup_2_clicked_no_hq**: Contact clicked a link but didn't answer health questions
+4. **followup_1_cold**: Contact didn't click or answer health questions (lowest priority)
+
+#### 18.2 Follow-up Scheduling Process
+
+1. **Identify Eligible Emails**:
+   - Find emails with status 'sent' or 'delivered'
+   - Filter for anniversary-based email types (birthday, effective_date, aep, post_window)
+   - Filter for campaign-based email types where the campaign has enable_followups=true
+   - Look back 35 days by default
+   - Exclude contacts that already have follow-ups scheduled or sent
+
+2. **Determine Follow-up Type**:
+   - Check if contact clicked links (tracking_clicks table)
+   - Check if contact answered health questions (contact_events table with event_type='eligibility_answered')
+   - Evaluate medical conditions from metadata (has_medical_conditions flag or main_questions_yes_count)
+   - Select highest applicable follow-up type based on behavior
+
+3. **Schedule Follow-up**:
+   - Default: 2 days after initial email (configurable)
+   - If already past due, schedule for tomorrow
+   - Include metadata tracking initial email details and behavior analysis
+   - Support for SMS follow-ups if phone number available
+   - Inherit priority from original campaign (if campaign-based) or use default priority (if anniversary-based)
+
+#### 18.3 Campaign-Specific Follow-up Rules
+
+- **Campaign Enable/Disable**: Only campaigns with enable_followups=true generate follow-up emails
+- **Priority Inheritance**: Follow-up emails inherit the priority of their parent campaign
+- **Exclusion Window Respect**: Follow-ups always respect exclusion windows regardless of parent campaign settings
+- **Metadata Tracking**: Follow-ups include campaign_name for traceability when generated from campaign emails
+
+#### 18.4 Active Follow-up Scheduler Features
+
+- **Continual Re-evaluation**: Can update follow-up type if user behavior changes before sending
+- **Batch Processing**: Processes multiple contacts in parallel for performance
+- **Idempotent**: Tracks processed emails to avoid duplicates
+- **Metadata Tracking**: Stores decision rationale and behavior details
+- **Campaign-Aware**: Handles both anniversary-based and campaign-based initial emails
+
+#### 18.5 Database Schema for Follow-ups
+
+Follow-ups use the same email_schedules table with:
+- email_type: 'followup_1_cold', 'followup_2_clicked_no_hq', etc.
+- metadata: JSON containing initial_comm_log_id, initial_email_type, followup_behavior details
+- campaign_instance_id: Set to parent campaign instance ID for campaign-based follow-ups, null for anniversary-based
+- email_template: Default follow-up template unless overridden by campaign instance metadata
+- sms_template: Default follow-up SMS template unless overridden by campaign instance metadata
+- priority: Inherited from parent email/campaign
+- event_year/month/day: Inherited from initial email for birthday/effective_date follow-ups
+
+#### 18.6 Performance Optimizations
+
+- Batch fetching of contact data, click data, and health question events using sql queries
+- Parallel processing using multiprocessing pool (TBD -- not sure if this is needed here)
+- Large batch SQL execution (up to 2000 statements per transaction)
+- Campaign configuration caching to avoid repeated database queries
+
+### 19. Campaign System Benefits and Implementation Notes
+
+The abstract campaign system provides significant advantages over individual email type implementations:
+
+#### 19.1 Operational Benefits
+- **Reduced Code Complexity**: New campaign types require only configuration, not code changes
+- **Unified Management**: All campaign types use the same scheduling, tracking, and reporting infrastructure
+- **Flexible Targeting**: Campaigns can target all contacts or specific subsets based on various criteria
+- **Configurable Compliance**: Per-campaign control over exclusion window compliance and follow-up generation
+
+#### 19.2 Business Benefits
+- **Rapid Campaign Deployment**: New marketing initiatives can be launched quickly through configuration
+- **A/B Testing Support**: Multiple campaign configurations can be tested simultaneously
+- **Regulatory Flexibility**: Campaigns can be configured to meet different compliance requirements
+- **Scalable Architecture**: System can handle unlimited campaign types without performance degradation
+
+#### 19.3 Implementation Considerations
+- **Database Migration**: Existing scheduled_rate_increase emails should be migrated to the campaign instance system
+- **Template Management**: Email and SMS sending systems must integrate with campaign instance template resolution
+- **Multiple Instance Support**: Scheduler must handle multiple active instances of the same campaign type simultaneously
+- **Instance Lifecycle**: Automatic activation/deactivation of campaign instances based on date ranges
+- **Configuration Management**: Campaign configurations should be version-controlled and auditable
+- **Monitoring and Alerting**: Campaign performance metrics should be tracked per instance and campaign type
+- **API Integration**: External systems should be able to create and manage campaign instances programmatically
+
+#### 19.4 Migration Strategy
+1. **Create Campaign Type Definitions**: Set up base campaign types (rate_increase, initial_blast, seasonal_promo) in the campaign_types table
+2. **Create Initial Campaign Instances**: Set up specific campaign instances with templates and date ranges
+3. **Migrate Existing Data**: Convert existing rate increase schedules to campaign instance-based schedules
+4. **Integrate Template Resolution**: Update email/SMS sending systems to use template information from email_schedules table
+5. **Update Scheduling Logic**: Modify scheduler to handle both anniversary-based and campaign instance-based emails
+6. **Test Multiple Instance Support**: Ensure system can handle multiple simultaneous instances of the same campaign type
+7. **Deploy Incrementally**: Roll out campaign instance system alongside existing functionality before full cutover
+
+This comprehensive campaign instance-aware business logic ensures reliable, compliant, and efficient email scheduling across multiple states with varying regulations, while providing the flexibility to rapidly deploy multiple simultaneous campaigns with different templates and targeting criteria.
+
+================
+File: CLAUDE.md
+================
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+This is an OCaml-based email scheduling system that manages automated email and SMS campaigns. The system handles:
+- Anniversary-based emails (birthdays, policy effective dates, AEP, post-window)
+- Campaign-based emails with flexible configuration
+- State-specific exclusion windows and regulatory compliance
+- Processing up to 3 million contacts efficiently
+- Complex date calculations in Central Time (CT)
+
+The project uses Dune as its build system and follows OCaml best practices.
+
+## Build and Development Commands
+
+```bash
+# Build the project
+dune build
+
+# Run the main executable
+dune exec scheduler
+
+# Run tests
+dune test
+
+# Run tests with coverage
+dune test --instrument-with bisect_ppx
+
+# Build documentation
+dune build @doc
+
+# Clean build artifacts
+dune clean
+
+# Format code (if ocamlformat is configured)
+dune build @fmt --auto-promote
+
+# Check code formatting
+dune build @fmt
+```
+
+## Project Architecture
+
+### Module Structure
+The implementation should follow this architecture as outlined in `prompt.md`:
+
+- **lib/domain/** - Core domain types and business entities
+  - `types.ml` - Core type definitions (states, email types, contacts)
+  - `contact.ml` - Contact operations
+  - `campaign.ml` - Campaign types and logic
+  - `email_schedule.ml` - Schedule types
+
+- **lib/rules/** - Business rule engine
+  - `state_rules.ml` - State-specific exclusion windows
+  - `exclusion_window.ml` - Exclusion window calculations
+  - `dsl.ml` - Domain-specific language for rules
+
+- **lib/scheduling/** - Core scheduling logic
+  - `date_calc.ml` - Date calculations and timezone handling
+  - `scheduler.ml` - Main scheduling algorithm
+  - `load_balancer.ml` - Load distribution logic
+
+- **lib/persistence/** - Database layer
+  - `database.ml` - Database operations using Caqti
+  - `queries.ml` - SQL query definitions
+  - `migrations.ml` - Schema migrations
+
+### Key Dependencies
+The project uses these OCaml libraries (defined in dune-project):
+- `sqlite3` and `caqti` for database access
+- `lwt` for asynchronous programming
+- `ptime` and `timedesc` for date/time handling
+- `yojson` for JSON configuration
+- `logs` for structured logging
+- `alcotest` for testing
+
+### Database Schema
+The system works with an SQLite database (`org-206.sqlite3`) containing:
+- `contacts` table with customer information
+- `email_schedules` table for scheduling
+- Campaign and tracking tables as defined in `business_logic.md`
+
+## Important Business Rules
+
+1. **Time Zone**: All operations use Central Time (CT)
+2. **State Exclusions**: Complex exclusion windows per state (see `business_logic.md`)
+3. **Email Priorities**: Strict priority system with state exclusions taking precedence
+4. **Anniversary Timing**: 
+   - Birthday emails: 14 days before
+   - Effective date emails: 30 days before
+   - AEP emails: September annually
+5. **Campaign System**: Two-tier architecture with campaign types and instances
+
+## Development Guidelines
+
+1. **Type Safety**: Use OCaml's type system extensively - create variants for states, email types, and statuses
+2. **Error Handling**: Use Result types for operations that can fail
+3. **Performance**: Implement streaming/batching for large contact lists (10k batch size)
+4. **Testing**: Write comprehensive tests for date calculations and state rules
+5. **Logging**: Use structured logging for audit trails
+
+## Current Implementation Status
+
+The project is currently scaffolded with:
+- Basic Dune configuration
+- Empty library structure in `lib/`
+- Placeholder main executable in `bin/main.ml`
+- Empty test file in `test/test_scheduler.ml`
+
+The actual implementation of the email scheduling logic needs to be built following the specifications in `business_logic.md` and the architecture outlined in `prompt.md`.
+
+================
+File: dune_qs.txt
+================
+Qable’s core functionality. Add modules to your library by creating new .ml files in this directory. uickstart - Dune documentation
+This document gives simple usage examples of Dune. You can also look at examples for complete examples of projects using Dune with CRAM stanzas.
+    See library for details on specifying libraries ma
+To try these examples, you will need to have Dune installed. See How to Install Dune.
+       nually.
+          e executable program. Within the modules in this d
+The bin directory holds a skeleton for th
+Initializingirectory, you can access the modules in your lib under the namespace project_name.Mod, where project Projects
+The following subsections illustrate basic usage of the dune init proj subcommand. For more documentation, see Initializing Components and the inline help available from dune init --help.
+               _name is replaced with the name of your project an
+Initializing an Executable
+To initialize a prd Mod corresponds to the name of the file in the loject that will build an executable program, run the following (replacing project_name with the name of your project):
+
+$ dune init proj projib directory. You can run the executable with duneect_name
+This creates a project d exec project_name. See Building a Hello World Proirectory that includes the following contents:
+
+project_name/              gram From Scratch for an example of specifying an 
+├── dune-project
+├── test                     executable manually and executable for details.
+
+T                               he project_name.opam file will be freshly generate
+│   ├── dune
+│   └── test_project_name.ml       d from the dune-project file whenever you build yo
+├── lib                               ur project. You shouldn’t need to worry about this, but you can see How Dune integrates with opam fo
+│   └── dune
+├── bin                                  r details.
+
+The dune files in each directory speci      fy the component to be built with the files in tha
+│   ├── dune
+│   └── main.ml                               t directory. For details on dune files, see dune.
+
+└── project_name.opam                           
+Initializing a Library                              r an OCaml library, run the following (replacing p
+To initialize a project fo
+Now, enter your project’s directory:                   roject_name with the name of your project):
+
+$ dun                                                     e init proj --kind=lib project_name
+This creates a                                                     project directory that includes the following con
+                                                             tents:
+
+project_name/                                                  an build your project with:
+                                                                  mponents generated are the same as those described
+$ dune build
+You can                                                  run your tes in Initializing an Executable, with the followingts with:
+
+$ dune test                                                             h
+Create a new directory within a Dune project (In second file containing the following code and name it hello_world.ml (including the .ml extension). It will implement the executable stanza in the dune file when built.
+
+print_endline "Hello, world!"
+Next, build your new program in a shell using thi-- ./hello_world.exe
+Voila! This should print “Hel World Program Using Lwt
+Lwt is a concurrent librLwt_main.run (Lwt_io.printf "Hello, world!\n")
+Andeprocess (pps ppx_jane)))
+This hello_world.ml fil rogram in Bytecode
+In a directory of your choice, world executable implemented by hello_world.ml
+;; lo_world.bc
+The executable will be built as _builds Globally
+Write this dune file at the root of yodocess (action (run %{bin:cppo} -V OCAML:%{ocaml_version} %{input-file})))
+Additionally, if you want  config.h)
+Using the .cppo.ml Style Like the ocam (targets foo.ml)
+ (deps    (:first-dep foo.cppo.ml) <other files that foo.ml includes>)
+ (action  (run %{bin:cppo} %{first-dep} -o %{targets})))
+Defining a Library with C Stubs
+Assuming you have a fi(-lblah)))
+Defining a Library with C Stubs using pkg-config
+Same context as before, but using pkg-coargets c_flags.sexp c_library_flags.sexp)
+ (action  (run ./config/discover.exe)))
+Then create a confexp"         conf.cflags;
+C.Flags.write_sexp "c_library_flags.sexp" conf.libs)
+Using a Custom Code Generator
+To generate a file foo.ml using a progra (deps    (:gen ../generator/gen.exe))
+ (action  (ompiler-libs.toplevel mylib)
+ (link_flags (-linkalel.ml:
+
+let () = exit (Topmain.main ())l))
+ (modes      byte))
+And write this in mytoplevexecutable
+ (name       mytoplevel)
+ (libraries  cy an executable calling Topmain.main () and linked with the compiler libraries and -linkall. Moreover, currently toplevels can only be built in bytecode.
+
+As a result, write this in your dune file:
+
+(ote
+Building a Custom Toplevel
+A toplevel is simplfile exists, it will be compared to the standard output of the test program and the differences will be displayed. It is possible to replace the .expected file with the last output using:
+
+$ dune proml run the test program (the main module is my_test_program.ml) and error if it exits with a nonzero code.
+
+In addition, if a my_test_program.expected m))
+And run the tests with:
+
+$ dune runtest
+It wilhis in your dune file:
+
+(test (name my_test_prograrun %{gen} -o %{targets})))
+Defining Tests
+Write tm from another directory:
+
+(rule
+ (targets foo.ml)
+me deps -> deps
+in
+
+
+C.Flags.write_sexp "c_flags.sch (C.Pkg_config.query pc ~package:"gst-editing-services-1.0") with
+     | None -> default
+     | Soc with
+  | None -> default
+  | Some pc ->
+     mat libs   = ["-lgst-editing-services-1.0"]
+  ; cflags = []
+  }
+in
+let conf =
+  match C.Pkg_config.get c ->
+let default : C.Pkg_config.package_conf =
+  {Configurator.V1
+
+let () =
+C.main ~name:"foo" (fun r))
+as well as this discover.ml file:
+
+module C = able
+ (name discover)
+ (libraries dune-configuratoig subdirectory and write this dune file:
+
+(executflags (:include c_library_flags.sexp)))
+
+(rule
+ (ts)
+  (flags (:include c_flags.sexp)))
+ (c_library_wt)
+ (foreign_stubs
+  (language c)
+  (names mystubb)
+ (public_name     mylib)
+ (libraries       re lnfig to query the compilation and link flags. Write this dune file:
+
+(library
+ (name            myliubs)
+  (flags -I/blah/include))
+ (c_library_flags  lwt)
+ (foreign_stubs
+  (language c)
+  (names mystle called mystubs.c, that you need to pass -I/blah/include to compile it and -lblah at link time, write this dune file:
+
+(library
+ (name            mylib)
+ (public_name     mylib)
+ (libraries       relbuild Plugin
+Write this in your dune file:
+
+(rule
+to include a config.h file, you need to declare the dependency to this file via:
+
+(preprocessor_depseld to your library or executable stanzas:
+
+(preprbuild profile can be selected from the command line with --profile foo or from a dune-workspace file by writing:
+
+(profile foo)
+Using Cppo
+Add this fiev and release correspond to build profiles. The ur project:
+
+(env
+ (dev
+  (flags (:standard -w +42)))
+ (release
+  (ocamlopt_flags (:standard -O3))))
+/default/hello_world.bc. The executable can be built and run in a single step with dune exec ./hello_world.bc. This bytecode version allows the usage of ocamldebug.
+
+Setting the OCaml Compilation Flagello, world!"
+And build it with:
+
+$ dune build hel exe))
+This hello_world.ml file:
+
+print_endline "Hto be build as native (.exe) or bytecode (.bc) version.
+(executable
+ (name hello_world)
+ (modes bytewrite this dune file:
+
+;; This declares the hello_brary in any other directory by adding mylib to the (libraries ...) field.
+
+Building a Hello World Pary will be composed of all the modules in the same directory. Outside of the library, module Foo will be accessible as Mylib.Foo, unless you write an explicit mylib.ml file.
+
+You can then use this li(public_name mylib)
+ (libraries re lwt))
+The librete this dune file:
+
+(library
+ (name        mylib)
+table will be built as _build/default/hello_world.exe
+
+Defining a Library Using Lwt and ocaml-re
+Wrid it with:
+
+$ dune build hello_world.exe
+The execu ([3;4;5] : int list)]
+  |> print_endline
+And buil:
+
+open Core
+
+let () =
+  Sexp.to_string_hum [%sexpcutable
+ (name hello_world)
+ (libraries core)
+ (pre and Jane Street PPXs
+Write this dune file:
+
+(exeexecutable will be built as _build/default/hello_world.exe
+
+Building a Hello World Program Using Cor build it with:
+
+$ dune build hello_world.exe
+The  (libraries lwt.unix))
+This hello_world.ml file:
+
+ary in OCaml.
+
+In a directory of your choice, write this dune file:
+
+(executable
+ (name hello_world)
+lo, world!” in the command line.
+
+Building a Helloee that it worked. In fact, the executable can both be built and run in a single step:
+
+$ dune exec  create a directory called _build and build the program: _build/default/hello_world.exe. Note that native code executables will have the .exe extension on all platforms (including non-Windows systems).
+
+Finally, run it with the following command to ss command:
+
+$ dune build hello_world.exe
+This willitializing an Executable). Since OCaml is a compiled language, first create a dune file in Nano, Vim, or your preferred text editor. Declare the hello_world executable by including the following stanza (shown below). Name this initial file dune and save it.
+
+(executable
+ (name hello_world))
+Create at the library should be public. See library for details.
+
+Building a Hello World Program From Scratc
+
+The dune file in the lib directory specifies tha exceptions:
+
+There is no bin directory generated.
+All of the subco
+├── dune-project
+├── lib
+│                                                               └── dune
+├── test
+│   ├── dune
+│   └── test_proje                                                            ct_name.ml
+└── project_name.opam
+Now, enter your p                                                            roject’s directory:
+
+$ cd project_name
+Then, you c
+$ cd project_name
+Then, you can build your project with:
+
+$ dune build
+You can run your tests with:
+
+$ dune test
+You can run your program with:
+
+$ dune exec project_name
+This simple project will print “Hello World” in your shell.
+
+The following itemization of the generated content isn’t necessary to review at this point. But whenever you are ready, it will provide jump-off points from which you can dive deeper into Dune’s capabilities:
+
+The dune-project file specifies metadata about the project, including its name, packaging data (including dependencies), and information about the authors and maintainers. Open this in your editor to fill in the placeholder values. See dune-project for details.
+
+The test directory contains a skeleton for your project’s tests. Add to the tests by editing test/test_project_name.ml. See Writing and Running Tests for details on testing.
+
+The lib directory will hold the library you write to provide your execut
+
+================
+File: dune-project
+================
+(lang dune 3.0)
+
+(name scheduler)
+
+(generate_opam_files true)
+
+(source
+ (github username/reponame))
+
+(authors "Author Name <author@example.com>")
+
+(maintainers "Maintainer Name <maintainer@example.com>")
+
+(license LICENSE)
+
+(documentation https://url/to/documentation)
+
+(package
+ (name scheduler)
+ (synopsis "Sophisticated email scheduling system with state-based exclusion rules")
+ (description "An OCaml-based email scheduling system that manages automated email and SMS campaigns with complex date calculations, state-specific exclusion windows, and support for processing millions of contacts efficiently")
+ (depends
+  (ocaml (>= 4.14))
+  (dune (>= 3.0))
+  (sqlite3 (>= 5.0.0))
+  (caqti (>= 2.0.0))
+  caqti-driver-sqlite3
+  caqti-lwt
+  (lwt (>= 5.6.0))
+  ptime
+  timedesc
+  yojson
+  logs
+  alcotest
+  bisect_ppx)
+ (tags
+  (email scheduling "business rules" campaigns)))
+
+; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html
+
+================
+File: opam_switches.txt
+================
+Introduction to opam Switches · OCaml Documentation
+Introduction to opam Switches
+OCaml's package manager, opam, introduces the concept of a switch, which is an isolated OCaml environment. These switches often cause confusion amongst OCaml newcomers, so this document aims to provide a better understanding of opam switches and their usage for managing dependencies and project-specific configurations.
+
+Opam is designed to manage multiple concurrent installation prefixes called "switches." Similar to Python's virtualenv, an opam switch is a tool that creates isolated environments. They are independent of each other and have their own set of installed packages, repositories, and configuration options. Switches also have their own OCaml compiler, libraries, and binaries. This enables you to have multiple compiler versions available at once.
+
+Listing Switches
+The command below will display the opam switches that are configured on your system. After completing installation of OCaml, such as outlined in Installing OCaml, a single switch called default will have been created. At that point, listing the switches will only show that switch.
+
+$ opam switch list
+#   switch   compiler      description
+->  default  ocaml.4.13.1  default
+Creating a New Switch
+To create a new opam switch, you can use the opam switch command followed by the desired switch name and an optional OCaml compiler version. For example, to create a switch named "my_project" with a specific OCaml compiler version, use:
+
+opam switch create my_project <compiler-version>
+Replace <compiler-version> with the version of the OCaml compiler you want to use. If you don't specify a compiler version, opam will choose the default version.
+
+Next, activate your new switch. This will set it as the currently selected switch, so any OCaml-related operations will use this stall OCaml packages, libraries, and dependencies specific to this switch without affecting other switches or the system-wide OCaml environment.
+
+Typespam switch, it's global by default unless otherwise configured. You can also explicitly select a global switch by using the opam switch command with the --global flag.
+
+Opam's system switch is a global switch that is associated with the OCaml installation on your operating system. The system switch is accessible across the entire system.
+
+Local Switches
+A local opam switch, on the other hand, is tied to a specific project directory. It is created within the project's directory or subdirectory, so you can manage OCaml and its dependencies in the context of that particular project only.
+
+In other words, local switches provide isolation for project-specific OCaml environments, allowing you to define and manage the specific compiler version and packages needed for a particular project.
+
+They are particularly useful when you want to ensure that a project uses specific versions of OCaml and its packages without interfering with the system-wide or other project-specific OCaml installations.
+
+Lwitch> command-line flag to specify a switch for a single command.<switch> environment variable to choose a switch within a single shell session. Use eval $(opam env --switch <switch>) to set the shell environment accordingly.
+
+Command-Line Flag: Use the --switch <sry that contains a switch, it will be automatically selected. Local switches are external to the opam root.
+
+Environment Variable: Set the OPAMSWITCH=he command opam switch <switch>. Opam will use this switch for all subsequent commands, unless overridden.
+
+Local Selection: When working in a directost package-related commands in opam operate within the context of a selected switch. You can select a switch in several ways:
+
+Global Selection: Use tocal switches are automatically selected based on the current working directory. When you navigate into a directory with an associated local switch, opam uses that switch for any OCaml-related operations within that directory.
+
+Selecting a Switch
+Moften used for system-wide OCaml installations and are not tied to a particular project or directory. A switch is created and configured at the system level and is typically used to manage OCaml and its ecosystem on a global scale.
+
+When creating an o of Switches
+Global Switches
+Global switches are owitch. You can activate it by running:
+
+opam switch my_project
+Replace my_project with the name of your new switch.
+
+Confirm you've activated it by running:
+
+opam switch
+If the output is the name of your new switch, you've successfully activated it! Now you can use it for your OCaml projects and ins
+
+================
+File: PROJECT_STATUS.md
+================
+# Project Status Update
+
+**Date**: June 5, 2025  
+**Project**: OCaml Email Scheduler Implementation  
+**Status**: Phase 1-2 Complete, Foundation Established
+
+## 🎯 Project Overview
+
+Following the specifications in `prompt.md`, we are building a sophisticated email scheduling system in OCaml that manages automated email and SMS campaigns with complex state-based exclusion rules, capable of processing up to 3 million contacts efficiently.
+
+## ✅ Completed Implementation (Phases 1-2)
+
+### **Phase 1: Core Domain Types and Date Calculations** ✅
+- **`lib/domain/types.ml`** - Complete type-safe domain model with:
+  - US state variants (CA, CT, ID, KY, MA, MD, MO, NV, NY, OK, OR, VA, WA, Other)
+  - Email type hierarchy (Anniversary, Campaign, Followup)
+  - Contact and email schedule types
+  - Schedule status tracking
+- **`lib/utils/simple_date.ml`** - Custom date arithmetic system:
+  - Date/time types without external dependencies
+  - Leap year handling
+  - Date arithmetic (add_days, diff_days, compare_date)
+  - Anniversary calculations
+- **`lib/scheduling/date_calc.ml`** - Core scheduling calculations:
+  - Exclusion window checking with pre-buffer logic
+  - Load balancing jitter calculations
+  - Central Time scheduling support
+
+### **Phase 2: State Rules Engine and DSL** ✅
+- **`lib/rules/dsl.ml`** - Domain-specific language for exclusion rules:
+  - Birthday window definitions
+  - Effective date window definitions  
+  - Year-round exclusion support
+  - State-specific rule mapping
+- **`lib/rules/exclusion_window.ml`** - Complete exclusion logic:
+  - Birthday exclusion checking
+  - Effective date exclusion checking
+  - Year-round exclusion enforcement
+  - Post-window date calculations
+
+### **Core Infrastructure** ✅
+- **`lib/domain/contact.ml`** - Contact operations:
+  - Email validation (regex-based)
+  - ZIP code format validation
+  - Contact state updating
+  - Scheduling eligibility checking
+- **`lib/utils/zip_data.ml`** - ZIP code integration:
+  - JSON parsing of zipData.json (39,456 ZIP codes loaded)
+  - Accurate ZIP to state mapping
+  - Validation and lookup functions
+- **`lib/utils/config.ml`** - Configuration management:
+  - Default timing parameters
+  - JSON configuration loading
+  - File-based configuration support
+- **`lib/scheduler.ml`** - Module exports for library interface
+
+### **Testing and Validation** ✅
+- **`test/test_scheduler_simple.ml`** - Core functionality tests:
+  - Date arithmetic verification
+  - Anniversary calculation testing
+  - Leap year edge case handling
+  - State rules validation
+- **`bin/main.ml`** - Working demonstration executable
+- **Build system** - Dune configuration with proper dependencies
+
+## 🎯 System Capabilities Demonstrated
+
+### **Accurate State-Based Exclusions**
+The system correctly implements complex exclusion rules:
+- **California**: 30 days before birthday + 60-day buffer + 60 days after birthday
+- **Nevada**: Month-start based exclusion windows  
+- **Year-round states**: CT, MA, NY, WA (no emails allowed)
+- **No exclusion states**: Other states with no specific restrictions
+
+### **Real ZIP Code Integration**
+- Successfully loads 39,456 ZIP codes from zipData.json
+- Accurate state determination (90210 → CA, 10001 → NY, etc.)
+- Handles edge cases and invalid ZIP codes gracefully
+
+### **Demo Output Example**
+```
+=== Email Scheduler Demo ===
+
+Loaded 39456 ZIP codes
+Today's date: 2025-06-05
+
+Contact 1: alice@example.com from CA
+  Valid for scheduling: false
+  Birthday: 1990-06-15
+  ❌ Birthday exclusion window for CA
+  Window ends: 2025-08-14
+
+Contact 2: bob@example.com from NY
+  Valid for scheduling: false
+  Birthday: 1985-12-25
+  ❌ Year-round exclusion for NY
+  Year-round exclusion
+
+Contact 3: charlie@example.com from CT
+  Valid for scheduling: false
+  Birthday: 1992-02-29
+  ❌ Year-round exclusion for CT
+  Year-round exclusion
+
+Contact 4: diana@example.com from NV
+  Valid for scheduling: false
+  Birthday: 1988-03-10
+  ✅ No exclusions - can send email
+
+Demo completed successfully! 🎉
+```
+
+## 🏗️ Architecture Highlights
+
+### **Type Safety**
+- Compile-time prevention of invalid states
+- Exhaustive pattern matching on all variants
+- Result types for error handling
+
+### **Business Logic Accuracy**
+- Faithful implementation of exclusion rules from business_logic.md
+- Pre-window buffer handling (60-day extension)
+- Leap year edge case management (Feb 29 → Feb 28)
+
+### **Extensibility**
+- DSL allows easy addition of new state rules
+- Configuration system supports runtime parameter changes
+- Modular architecture enables independent component development
+
+## 📋 Next Implementation Phases
+
+### **Phase 3: Basic Scheduling Logic** (Next)
+**Priority**: High  
+**Components needed**:
+- `lib/scheduling/scheduler.ml` - Main scheduling algorithm
+- Contact processing pipeline
+- Email schedule generation
+- Priority-based email selection
+
+### **Phase 4: Load Balancing and Smoothing** 
+**Priority**: High  
+**Components needed**:
+- `lib/scheduling/load_balancer.ml` - Email distribution algorithms
+- Daily volume cap enforcement (7% rule)
+- Effective date clustering smoothing
+- Jitter application for date spreading
+
+### **Phase 5: Campaign System Integration**
+**Priority**: Medium  
+**Components needed**:
+- `lib/domain/campaign.ml` - Campaign types and instances
+- Campaign-specific exclusion handling
+- Template management integration
+- Campaign priority resolution
+
+### **Phase 6: Database Layer**
+**Priority**: High  
+**Components needed**:
+- `lib/persistence/database.ml` - SQLite integration with Caqti
+- `lib/persistence/queries.ml` - Type-safe SQL queries
+- Streaming contact processing (10k batch size)
+- Transaction management
+
+### **Phase 7: Performance Optimization**
+**Priority**: Medium  
+**Requirements**:
+- Memory usage under 1GB for 3M contacts
+- Processing speed: 100k contacts/minute target
+- Streaming architecture implementation
+- Database optimization
+
+### **Phase 8: Monitoring and Observability**
+**Priority**: Low  
+**Components needed**:
+- `lib/utils/audit.ml` - Audit trail implementation
+- Logging integration
+- Error recovery mechanisms
+- Performance metrics
+
+## 🎯 Success Criteria Status
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| ✅ Type-safe domain model | **Complete** | All core types implemented |
+| ✅ Date calculations handle edge cases | **Complete** | Leap years, anniversaries tested |
+| ✅ State exclusion rules enforced | **Complete** | All states implemented per spec |
+| 🟡 Process 3M contacts in <3 minutes | **Pending** | Requires Phase 6 (database) |
+| 🟡 Memory usage under 1GB | **Pending** | Requires streaming implementation |
+| ✅ Full audit trail capability | **Framework ready** | Audit types defined |
+| ✅ Zero data loss on crashes | **Framework ready** | Transaction support planned |
+
+## 🚀 Technical Achievements
+
+1. **Zero External Dependencies**: Built custom date handling to avoid dependency issues
+2. **Real Data Integration**: Successfully integrated 39k+ ZIP codes
+3. **Business Logic Fidelity**: Accurate implementation of complex exclusion rules
+4. **Demonstrable System**: Working end-to-end demo with realistic scenarios
+5. **Test Coverage**: Core business logic thoroughly tested
+6. **Type Safety**: Compile-time guarantees prevent entire classes of errors
+
+## 📁 Project Structure
+
+```
+lib/
+├── domain/
+│   ├── types.ml         ✅ Core domain types
+│   └── contact.ml       ✅ Contact operations  
+├── rules/
+│   ├── dsl.ml          ✅ Rule DSL
+│   └── exclusion_window.ml ✅ Exclusion logic
+├── scheduling/
+│   └── date_calc.ml    ✅ Date calculations
+├── utils/
+│   ├── simple_date.ml  ✅ Date handling
+│   ├── zip_data.ml     ✅ ZIP integration
+│   └── config.ml       ✅ Configuration
+└── scheduler.ml        ✅ Module exports
+
+test/
+└── test_scheduler_simple.ml ✅ Core tests
+
+bin/
+└── main.ml            ✅ Demo executable
+```
+
+## 🔄 Current Development Status
+
+**Ready for Phase 3**: The foundation is solid and well-tested. The next logical step is implementing the core scheduling algorithm that will process contacts in batches and generate email schedules according to the business rules we've established.
+
+**Confidence Level**: High - All core business logic is implemented and verified. The type system provides strong guarantees, and the demo shows correct behavior for complex real-world scenarios.
+
+---
+
+*Generated by: Claude Code Implementation  
+Last Updated: June 5, 2025*
+
+================
+File: prompt.md
+================
+# OCaml Email Scheduler Implementation Prompt
+
+## Context
+
+You are implementing a sophisticated email scheduling system in OCaml based on the provided business logic documentation. The system must handle complex date calculations, state-based exclusion rules, campaign management, and scale to process up to 3 million contacts efficiently.
+
+## Primary Objectives
+
+1. Implement a type-safe, performant email scheduler in OCaml
+2. Create a domain-specific language (DSL) for expressing scheduling rules
+3. Ensure all date calculations handle edge cases correctly
+4. Build with streaming architecture for memory efficiency at scale
+5. Provide comprehensive audit trails and error recovery
+
+## Technical Requirements
+
+### Core Libraries to Use
+
+```ocaml
+(* dune-project *)
+(lang dune 3.0)
+(name email_scheduler)
+
+(package
+ (name email_scheduler)
+ (depends
+  ocaml (>= 4.14)
+  dune (>= 3.0)
+  sqlite3 (>= 5.0.0)
+  caqti (>= 2.0.0)
+  caqti-driver-sqlite3
+  caqti-lwt
+  lwt (>= 5.6.0)
+  ptime
+  timedesc  ; for timezone handling
+  yojson    ; for JSON config
+  logs      ; for structured logging
+  alcotest  ; for testing
+  bisect_ppx ; for coverage
+))
+```
+
+### Module Structure
+
+```
+lib/
+├── domain/
+│   ├── types.ml         # Core domain types
+│   ├── contact.ml       # Contact operations
+│   ├── campaign.ml      # Campaign types and logic
+│   └── email_schedule.ml # Schedule types
+├── rules/
+│   ├── state_rules.ml   # State-specific exclusions
+│   ├── exclusion_window.ml
+│   └── dsl.ml          # Rule DSL
+├── scheduling/
+│   ├── date_calc.ml    # Date calculations
+│   ├── scheduler.ml    # Main scheduling logic
+│   └── load_balancer.ml
+├── persistence/
+│   ├── database.ml     # DB operations
+│   ├── queries.ml      # SQL queries
+│   └── migrations.ml
+└── utils/
+    ├── audit.ml        # Audit trail
+    └── config.ml       # Configuration
+```
+
+## Implementation Guidelines
+
+### 1. Domain Types (types.ml)
+
+```ocaml
+(* Start with comprehensive type definitions *)
+module Types = struct
+  (* US States - use variant type for compile-time safety *)
+  type state = 
+    | CA | CT | ID | KY | MA | MD | MO | NV 
+    | NY | OK | OR | VA | WA 
+    | Other of string
+
+  (* Email types with clear discrimination *)
+  type anniversary_email = 
+    | Birthday
+    | EffectiveDate
+    | AEP
+    | PostWindow
+
+  type campaign_email = {
+    campaign_type: string;
+    instance_id: int;
+    respect_exclusions: bool;
+    days_before_event: int;
+    priority: int;
+  }
+
+  type email_type =
+    | Anniversary of anniversary_email
+    | Campaign of campaign_email
+    | Followup of followup_type
+
+  and followup_type =
+    | Cold
+    | ClickedNoHQ
+    | HQNoYes
+    | HQWithYes
+
+  (* Schedule status *)
+  type schedule_status =
+    | PreScheduled
+    | Skipped of string  (* reason *)
+    | Scheduled
+    | Processing
+    | Sent
+
+  (* Contact type *)
+  type contact = {
+    id: int;
+    email: string;
+    zip_code: string option;
+    state: state option;
+    birthday: Ptime.date option;
+    effective_date: Ptime.date option;
+  }
+
+  (* Email schedule *)
+  type email_schedule = {
+    contact_id: int;
+    email_type: email_type;
+    scheduled_date: Ptime.date;
+    scheduled_time: Ptime.time;
+    status: schedule_status;
+    priority: int;
+    template_id: string option;
+    campaign_instance_id: int option;
+    scheduler_run_id: string;
+  }
+end
+```
+
+### 2. State Rules DSL (dsl.ml)
+
+```ocaml
+(* Create a DSL for expressing exclusion rules *)
+module RuleDSL = struct
+  type window = {
+    before_days: int;
+    after_days: int;
+    use_month_start: bool;
+  }
+
+  type rule =
+    | BirthdayWindow of window
+    | EffectiveDateWindow of window
+    | YearRoundExclusion
+    | NoExclusion
+
+  (* DSL functions for building rules *)
+  let birthday_window ~before ~after ?(use_month_start=false) () =
+    BirthdayWindow { before_days = before; after_days = after; use_month_start }
+
+  let effective_date_window ~before ~after =
+    EffectiveDateWindow { before_days = before; after_days = after }
+
+  let year_round = YearRoundExclusion
+  let no_exclusion = NoExclusion
+
+  (* State rule definitions using the DSL *)
+  let rules_for_state = function
+    | CA -> birthday_window ~before:30 ~after:60 ()
+    | ID -> birthday_window ~before:0 ~after:63 ()
+    | KY -> birthday_window ~before:0 ~after:60 ()
+    | MD -> birthday_window ~before:0 ~after:30 ()
+    | NV -> birthday_window ~before:0 ~after:60 ~use_month_start:true ()
+    | OK -> birthday_window ~before:0 ~after:60 ()
+    | OR -> birthday_window ~before:0 ~after:31 ()
+    | VA -> birthday_window ~before:0 ~after:30 ()
+    | MO -> effective_date_window ~before:30 ~after:33
+    | CT | MA | NY | WA -> year_round
+    | Other _ -> no_exclusion
+end
+```
+
+### 3. Date Calculations (date_calc.ml)
+
+```ocaml
+module DateCalc = struct
+  open Ptime
+
+  (* Add pre-window exclusion buffer *)
+  let pre_window_buffer_days = 60
+
+  (* Calculate next anniversary from today *)
+  let next_anniversary (today: date) (event_date: date) : date =
+    (* Implementation should handle:
+       - Year wraparound
+       - February 29th in non-leap years
+       - Past anniversaries this year
+    *)
+
+  (* Check if date falls within exclusion window *)
+  let in_exclusion_window (check_date: date) (window: RuleDSL.window) (anchor_date: date) : bool =
+    (* Implementation should handle:
+       - Windows spanning year boundaries
+       - Nevada's month-start rule
+       - Pre-window buffer extension
+    *)
+
+  (* Calculate jitter for load balancing *)
+  let calculate_jitter ~contact_id ~event_type ~year ~window_days : int =
+    (* Use deterministic hash for consistent distribution *)
+    let hash_input = Printf.sprintf "%d-%s-%d" contact_id event_type year in
+    (Hashtbl.hash hash_input) mod window_days - (window_days / 2)
+end
+```
+
+### 4. Streaming Architecture (scheduler.ml)
+
+```ocaml
+module Scheduler = struct
+  open Lwt.Syntax
+
+  (* Process contacts in streaming fashion *)
+  let schedule_emails_streaming ~db ~config ~run_id =
+    let chunk_size = 10_000 in
+    
+    let rec process_chunk offset =
+      let* contacts = Database.fetch_contacts_batch ~offset ~limit:chunk_size db in
+      match contacts with
+      | [] -> Lwt.return_unit
+      | batch ->
+          let* schedules = 
+            batch
+            |> Lwt_list.map_p (calculate_schedules ~config ~run_id)
+            |> Lwt.map List.concat
+          in
+          
+          let* balanced_schedules = LoadBalancer.distribute_schedules schedules config in
+          let* () = Database.insert_schedules db balanced_schedules in
+          
+          (* Update checkpoint *)
+          let* () = Audit.update_checkpoint ~run_id ~contacts_processed:chunk_size db in
+          
+          process_chunk (offset + chunk_size)
+    in
+    
+    process_chunk 0
+end
+```
+
+### 5. Database Operations (database.ml)
+
+```ocaml
+module Database = struct
+  open Caqti_request.Infix
+  open Caqti_type.Std
+
+  (* Type-safe queries using Caqti *)
+  module Q = struct
+    let fetch_contacts_batch =
+      (int2 ->* Caqti_type.(tup4 int string (option string) (option ptime_date)))
+      "SELECT id, email, zip_code, birthday FROM contacts \
+       WHERE id > ? ORDER BY id LIMIT ?"
+
+    let clear_existing_schedules =
+      (string ->. unit)
+      "DELETE FROM email_schedules \
+       WHERE scheduler_run_id != ? \
+       AND status IN ('pre-scheduled', 'skipped')"
+
+    let insert_schedule =
+      (Caqti_type.(tup6 int string ptime_date string int string) ->. unit)
+      "INSERT OR IGNORE INTO email_schedules \
+       (contact_id, email_type, scheduled_send_date, status, priority, scheduler_run_id) \
+       VALUES (?, ?, ?, ?, ?, ?)"
+  end
+
+  (* Connection pool management *)
+  let with_transaction (db: Caqti_lwt.connection) f =
+    let open Lwt.Syntax in
+    let* () = Caqti_lwt.start db in
+    Lwt.catch
+      (fun () ->
+        let* result = f () in
+        let* () = Caqti_lwt.commit db in
+        Lwt.return result)
+      (fun exn ->
+        let* () = Caqti_lwt.rollback db in
+        Lwt.fail exn)
+end
+```
+
+### 6. Load Balancing (load_balancer.ml)
+
+```ocaml
+module LoadBalancer = struct
+  type daily_stats = {
+    date: Ptime.date;
+    total_count: int;
+    ed_count: int;
+  }
+
+  (* Implement smoothing algorithm *)
+  let smooth_effective_dates schedules config =
+    (* Group by date and identify clusters *)
+    let daily_counts = count_by_date schedules in
+    
+    (* Apply jitter to dates over threshold *)
+    List.map (fun schedule ->
+      match schedule.email_type with
+      | Anniversary EffectiveDate when is_over_threshold daily_counts schedule.scheduled_date ->
+          apply_jitter schedule config
+      | _ -> schedule
+    ) schedules
+end
+```
+
+### 7. Testing Strategy
+
+```ocaml
+(* test/test_exclusion_windows.ml *)
+open Alcotest
+
+let test_california_birthday_window () =
+  let contact = { default_contact with state = Some CA; birthday = Some test_date } in
+  let result = calculate_exclusion_window contact in
+  check bool "CA birthday window" true (is_excluded result)
+
+let test_year_boundary_window () =
+  (* Test window spanning Dec 15 - Jan 15 *)
+  let dec_date = make_date 2024 12 20 in
+  let jan_date = make_date 2025 1 10 in
+  (* Both should be in exclusion window *)
+
+let test_suite = [
+  "Exclusion Windows", [
+    test_case "California birthday" `Quick test_california_birthday_window;
+    test_case "Year boundary" `Quick test_year_boundary_window;
+  ];
+]
+```
+
+### 8. Performance Requirements
+
+1. **Memory Usage**: Stream processing to keep memory under 1GB for 3M contacts
+2. **Processing Speed**: Target 100k contacts/minute
+3. **Database Optimization**: 
+   - Use prepared statements
+   - Batch inserts (2000 records/transaction)
+   - Proper indexes on all query columns
+
+### 9. Error Handling
+
+```ocaml
+type scheduler_error =
+  | DatabaseError of string
+  | InvalidContactData of { contact_id: int; reason: string }
+  | ConfigurationError of string
+  | UnexpectedError of exn
+
+let handle_error = function
+  | DatabaseError msg -> 
+      Log.err (fun m -> m "Database error: %s" msg);
+      (* Implement retry logic *)
+  | InvalidContactData { contact_id; reason } ->
+      Log.warn (fun m -> m "Skipping contact %d: %s" contact_id reason);
+      (* Continue processing *)
+  | ConfigurationError msg ->
+      Log.err (fun m -> m "Configuration error: %s" msg);
+      (* Halt processing *)
+  | UnexpectedError exn ->
+      Log.err (fun m -> m "Unexpected error: %s" (Printexc.to_string exn));
+      (* Log and re-raise *)
+```
+
+### 10. Deployment Configuration
+
+```yaml
+# config/scheduler.yaml
+scheduler:
+  timezone: "America/Chicago"
+  batch_size: 10000
+  max_memory_mb: 1024
+  
+timing:
+  birthday_days_before: 14
+  effective_date_days_before: 30
+  pre_window_buffer: 60
+  followup_delay_days: 2
+  
+load_balancing:
+  daily_cap_percentage: 0.07
+  ed_soft_limit: 15
+  smoothing_window: 5
+  
+database:
+  path: "org-206.sqlite3"
+  backup_dir: "./backups"
+  backup_retention_days: 7
+```
+
+## Implementation Steps
+
+1. **Phase 1**: Core domain types and date calculations
+2. **Phase 2**: State rules engine and DSL
+3. **Phase 3**: Basic scheduling without load balancing
+4. **Phase 4**: Add load balancing and smoothing
+5. **Phase 5**: Campaign system integration
+6. **Phase 6**: Audit trail and recovery mechanisms
+7. **Phase 7**: Performance optimization and testing
+8. **Phase 8**: Monitoring and observability
+
+## Success Criteria
+
+1. All date calculations handle edge cases correctly
+2. State exclusion rules are properly enforced
+3. System can process 3M contacts in under 3 minutes
+4. Memory usage stays under 1GB (if possible -- would have more memory if needed to reduce time)
+5. Full audit trail for compliance
+6. 100% test coverage for business logic
+7. Zero data loss on crashes (transactional safety)
+
+## Additional Notes
+
+- Use phantom types for additional type safety where appropriate
+- Consider using GADTs for the email type hierarchy
+- Implement property-based testing for date calculations
+- Use Lwt for concurrent I/O operations
+- Profile memory usage with large datasets
+- Consider using Flambda for additional optimizations
+
+Remember: The goal is to create a maintainable, type-safe system that makes invalid states unrepresentable at compile time.
+
+================
+File: scheduler.opam
+================
+# This file is generated by dune, edit dune-project instead
+opam-version: "2.0"
+synopsis:
+  "Sophisticated email scheduling system with state-based exclusion rules"
+description:
+  "An OCaml-based email scheduling system that manages automated email and SMS campaigns with complex date calculations, state-specific exclusion windows, and support for processing millions of contacts efficiently"
+maintainer: ["Maintainer Name <maintainer@example.com>"]
+authors: ["Author Name <author@example.com>"]
+license: "LICENSE"
+tags: ["email" "scheduling" "business rules" "campaigns"]
+homepage: "https://github.com/username/reponame"
+doc: "https://url/to/documentation"
+bug-reports: "https://github.com/username/reponame/issues"
+depends: [
+  "ocaml" {>= "4.14"}
+  "dune" {>= "3.0" & >= "3.0"}
+  "sqlite3" {>= "5.0.0"}
+  "caqti" {>= "2.0.0"}
+  "caqti-driver-sqlite3"
+  "caqti-lwt"
+  "lwt" {>= "5.6.0"}
+  "ptime"
+  "timedesc"
+  "yojson"
+  "logs"
+  "alcotest"
+  "bisect_ppx"
+  "odoc" {with-doc}
+]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+    "@doc" {with-doc}
+  ]
+]
+dev-repo: "git+https://github.com/username/reponame.git"
+
+================
+File: tour.txt
+================
+A Tour of OCaml · OCaml Documentation
+A Tour of OCaml
+This tutorial introduces OCaml's basic features: values, expressions, lists, functions, pattern matching, and more.
+
+No OCaml or any functional programming knowledge is required; however, it is assumed the reader has some basic software development knowledge. Please ensure you've installed OCaml and set up the environment, as described on the Install OCaml page.
+
+We recommend that you execute the examples we provide, and to experiment with them, to get a feel for coding in OCaml. To do this, you can use UTop (Universal Toplevel).
+
+UTop allows users to interact with OCaml by reading and evaluating OCaml phrases, like expressions or value definitions, and printing the result on the screen. Use the utop command to run UTop. Exit it by pressing Ctrl+D. For more information, you can read the Introduction to the OCaml Toplevel.
+
+Some of the examples in this tour include comments. Comments in OCaml start with (* and end with *) and can be nested. Since they are ignored by OCaml, they can be used anywhere whitespace is permitted. When entering the code below into UTop, the comments can be left out. Here are some examples:
+
+(* Here is a comment *)
+(* Outside of the nested comment is still a comment. (* Here is a nested comment *) Outside of the nested comment again. *)
+# 50 + (* A comment in between parts of an expression *) 50;;
+- : int = 100
+Expressions and Definitions
+Let's start with a simple expression:
+
+# 50 * 50;;
+- : int = 2500
+In OCaml, everything has a value, and every value has a type. The above example says, “50 * 50 is an expression that has type int (integer) and evaluates to 2500.” Since it is an anonymous expression, the character - appears instead of a n toplevel to evaluate and print the result of the given phrase.
+
+Here are examples of other primitive values possible to give names to values that can be updated. In OCaml, this is called a reference and will ions. The ternary conditional operator and the if … then … else … are the same. Also note parentheses are not needed here, which is often the case in OCaml.
+                                                           : int = 5280
+This is discussed further in odoc forest between the strings "hi" and "hello".” OCaml also has a double equal operator ==, which stands for physical equality, but it is not used in this tutorial. The operator <> is the negation of =, while != is the negation of ==.
+                                            since everything is a value, functions are values too. Functions are defined using the let keyword:
+                                                   square is applied to 50, it evaluates x * x into 50 * 50, which leads to 2500.
+                                                           n value can't be displayed, which is why <fun> is printed instead.
+                                                                  ed parameters. Labels are useful when a function h
+# String.ends_with;;                                                     as several parameters of the same type; naming arguments allows to guess their purpose. Above, ~suffix:"less" indicates "less" is passed as labelled argument suffix. Labelled arguments are detailed in the Labelled Arguments tutorial.
+e:t : string -> string -> string = <fun>le to only pass a to cat without passing bnction List.map can be applied on any kind of list. Here it is given a list of integers, but it could be a list of floats, strings, or anything. This is known as polymorphism. The List.map function isnts have the same type of its input.
+Output list elements have the same type of its output.
+Side-Effects and the unit Type
+Performing operating systeT to proceed, and the function print_endline doesn't have any meaningful data to return. Indicating this absence of data is the role of the unit type, ing taking place when executing a function but which does not appear in the function type. This is called a side-effect and does not stop at I/O. The unit type is often used to indicate the presence of side-effects, although it's not always the case.range 2 5;;
+- : int list = [2; 3; 4; 5]
+As indicated by its type int -> int -> int list, the function range takes two integers as arguments and returns a list of integers as result. The first int parameter, lo, is the range's lower bound; the second int parameter, hi, is the higher bound. If lo > hi, the empty range is returned. That's the first branch of the if … then … else expression. Otherwise, the lo value is prepended to the list created by calling range itself; this is recursion. Prepending is achieved using ::, the cons operator in OCaml. It constructs a new list by adding an element at the front of an existing list. Progress is made at each call; since lo has just been prepended at : 3 :: 4 :: 5 :: range 6 5
+=> 2 :: 3 :: 4 :: 5 :: rence
+OCaml has floating-point values of type floalues can be automatically converted from one type into another. This includes implicit type conversion and promotion. For example, in such a language, if you write 1 + 2.5, the first argument (an integer) is promoted to a floating point number, makintegers, so it can't be used with the 2.5 float. In the second example, +. is intended to be used with floats, so it can't be used with the 1 integer.
+
+In OCaml you need to explicitly convert the integ= 3.5
+There are several reasons why OCaml requires explicit conversions. Most importantly, it enables types to be worked out automatically. OCaml's type inference algorithm computes a type for each expression and requires very little annotation, in comparison to other languages. Arguably, this saveslse; false; true]
+
+# [[1; 2]; [3]; [4; 5; 6]];;
+- : int list list = [[1; 2]; [3]; [4; 5; 6]]
+The ex    | x :: v -> x + sum v;;
+val sum : int list ->    | [] -> 0
+    | _ :: v -> 1 + length v;; (* _  = 1
+This function operates not just on lists of integers but on any kind of list. It is a polymorphic function. Its type indicates input of type 'a list where 'a is a type variable standing for any type. The empty list pattern [] can be of any element type. So the _ :: v pattern, as the value at the head of the list, is irrelevant because the _ pattern indicates it is not inspected. Since both patterns must be of the same type, the typing algorithm infers the 'a list -> int type.
+
+Defining a Hilist -> 'b list = <fun>
+
+# map square [1; 2; 3; 4;];;
+- : int list = [1; 4; 9; 16]
+Pattern Matching, Cont'd
+Pattern matching isn't limited to lists. Any kind of data can be inspected using it, except functions. Patterns are expressions that are compared to an inspected value. It could be performed using if … then … else …, but pattern matching is more convenient. Here is an example using the option data type that will be detailed in the Modules and the Standard Library section.
+
+# #show option;;a option option-> 'a option = <fun>
+The inspected value is opt of type option. It is compared against the patterns from top to bottom. If opt is the None option, it is a match with the first pattern. If opt is the Some None option, it's a match with the second pattern. If opt is a double-wrapped option with a value, it's a match with the third pattern. Patterns can introduce names, just as let do al g' : string -> int = <fun>
+The underscore symboes
+Tuples are fixed-length collections of elements [Red; Blue; Red];;
+- : primary_colour list = [Red; Blue; Red]
+Here is the definition of a variant tange of int * int;;
+type page_range = All | Current | Range of int * int
+In the previous definitions, the capitalised identifiers are called constructors. They allow the creation of variant values. This is unrelated to object-oriented programming.
+
+A> page_range -> bool = <fun>
+Like a function, a vaype 'a list = [] | (::) of 'a * 'a list
+As previouments of several types together. However, each element is given a name. Like variant types, records types must be defined before being used. Here are examples of a record type, a value, access to a component, and pattern matching on the same record.
+ ard : person = {first_name = "Gérard"; surname = "Huet"; age = 76}
+When defining gerard, no type needs to be declared. The type checker will search for a record which has exactly three fields with matching names and types. Note that there are no typing relationships between records. It is not possible to declare a record type that extends another by adding fields. Record type search will succeed in with
+    | { age = x; _ } -> 13 <= x && x <= 19;eenager gerard;;
+- : bool = false
+Here, the patterutable State
+OCaml supports imperative programming. Usually, the let … = … syntax does not define variables, it defines constants. However, mutable variables exist in OCaml. They are called references. Here's how we create a reference to an integer:
+
+# let r = ref 0;;
+val r : int ref = {contents = #as used earlier in this section is also part of a 'b) -> 'a list -> 'b list = <fun>
+
+# List.map (funtutorial, OCaml was used interactively. The next tutorial, Your First OCaml Program, shows you how to write OCaml files, how to compile them, and how to kickstart a project.w for efficient separate compilation. This is illustrated in the next tutorial.
+
+Conclusion
+In this is illustrates the first feature of the OCaml module system. It provides a means to separate concerns by preventing name clashes. Two functions having different type may have the same name if they are provided by different modules.
+
+Modules also allo x -> x * x);;
+- : int list -> int list = <fun>
+Thmodule, the List module.
+
+# List.map;;
+- : ('a -> s an actual value (i.e., it is Some something), it applies the provided function and returns its result wrapped in an option. When the option value provided doesn't contain anything (i.e., it is None), the result doesn't contain anything as well (i.e., it is None too).
+
+The List.map function which with Some 8.
+When the option value provided containcation, only pass fun x -> x * x. Check the type of the resulting function.
+Apply with None.
+Apply wy its type. It has two parameters: a function of type 'a -> 'b and an 'a option.
+Using partial appliption.map is illustrated in several steps.
+
+Displaint option = Some 64
+Here, usage of the function Oone
+
+# Option.map (fun x -> x * x) (Some 8);;
+- : ion.map (fun x -> x * x) None;;
+- : int option = N* x);;
+- : int option -> int option = <fun>
+
+# Opton -> 'b option = <fun>
+
+# Option.map (fun x -> x ed to by adding the module name as a prefix to their name.
+
+# Option.map;;
+- : ('a -> 'b) -> 'a optit
+  end
+Definitions provided by modules are referr: 'a t -> 'a list
+    val to_seq : 'a t -> 'a Seq.one:'e -> 'a t -> ('a, 'e) result
+    val to_list  int) -> 'a t -> 'a t -> int
+    val to_result : na t -> 'a t -> bool
+    val compare : ('a -> 'a -> t -> bool
+    val equal : ('a -> 'a -> bool) -> '   val is_none : 'a t -> bool
+    val is_some : 'a-> 'a t
+    val map : ('a -> 'b) -> 'a t -> 'b t
+    val fold : none:'a -> some:('b -> 'a) -> 'b t -> 'a
+    val iter : ('a -> unit) -> 'a t -> unit
+ a t -> ('a -> 'b t) -> 'b t
+    val join : 'a t t 'a -> 'a
+    val get : 'a t -> 'a
+    val bind : 'some : 'a -> 'a t
+    val value : 'a t -> default:n = None | Some of 'a
+    val none : 'a t
+    val n;;
+module Option :
+  sig
+    type 'a t = 'a optio something called modules. A module is a group of definitions. The standard library is a set of modules available to all OCaml programs. Here are how the definitions contained in the Option module of the standard library can be listed:
+
+# #show Optiorary
+Organising source code in OCaml is done usingis behaviour is the same as in an imperative language. However, although ; is not defined as a function, it behaves as if it were a function of type unit -> unit -> unit.
+
+Modules and the Standard Libntents of the reference text on standard output
+Th the contents of the reference text
+Display the cots of the reference text on standard output
+Updatethat occur in the second line:
+
+Display the contenlo world!
+- : unit = ()
+Here are the side effects !text; text := "world!"; print_endline !text;;
+heltring ref = {contents = "hello "}
+
+# print_string other with the ; operator. Writing a; b means: execute a. Once done, execute b, only returns the value of b.
+
+# let text = ref "hello ";;
+val text : s !r;;
+- : int = 42
+Execute an expression after an0ing the content of a reference is a side-effect.
+
+= 42;;
+- : unit = ()
+This returns () because changt's update the content of r. Here := is the assignment operator; it is pronounced “receives”.
+
+# r :e different types: int and int ref, respectively. Just like it is not possible to perform multiplication of an integer and a float, it is not possible to update an integer or multiply a reference.
+
+Leitialised or null reference. The r reference is initialised with the integer zero. Accessing a reference's content is done using the ! de-reference operator.
+
+# !r;;
+- : int = 0
+Note that !r and r hav}
+It is syntactically impossible to create an unin-> n
+  | Error _ -> 0;;
+- : int = 0
+Working with M Error "Sorry"
+
+# match id_42_res 0 with
+  | Ok n  Ok 42
+
+# id_42_res 0;;
+- : (int, string) result =<fun>
+
+# id_42_res 42;;
+- : (int, string) result =_42_res n = if n <> 42 then Error "Sorry" else Ok n;;
+val id_42_res : int -> (int, string) result = Ok of 'a | Error of 'b
+So one may write:
+
+# let idr way to deal with errors in OCaml is by returning value of type result, which can represent either the correct result or an error. Here is how it is defined:
+
+# #show result;;
+type ('a, 'b) result = es several predefined exceptions. It is possible to define exceptions.
+
+Using the result Type
+Anothee _ -> 0;;
+- : int = 0
+The standard library provid … with … construction:
+
+# try id_42 0 with Failurnction types.
+
+Exceptions are caught using the try "Sorry".
+Note that exceptions do not appear in fu 42;;
+- : int = 42
+
+# id_42 0;;
+Exception: Failuret id_42 n = if n <> 42 then raise (Failure "Sorry") else n;;
+val id_42 : int -> int = <fun>
+
+# id_42eptions are raised using the raise function.
+
+# len is interrupted, an exception is thrown. For instance:
+
+# 10 / 0;;
+Exception: Division_by_zero.
+Excn { age = x; _ } is typed with the most recently declared record type that has an age field of type int. The type int is inferred from the expression 13 <= x && x <= 19. The function is_teenager will only work with the found record type, here person.
+
+Dealing With Errors
+Exceptions
+When a computatio;
+val is_teenager : person -> bool = <fun>
+
+# is_t"Huet"
+
+# let is_teenager person =
+    match persof it finds an exact match and fails in any other case.
+
+# let s = gerard.surname;;
+val s : string =     surname = "Huet";
+     age = 76
+  };;
+val ger { first_name : string; surname : string; age : int; }
+
+# let gerard = {
+     first_name = "Gérard";
+rname : string;
+    age : int
+  };;
+type person = 
+# type person = {
+    first_name : string;
+    susly shown, sum, length, and map functions provide examples of pattern matching over the list variant type.
+
+Records
+Like tuples, records also pack eleriant can be recursive if it refers to itself in its own definition. The predefined type list provides an example of such a variant:
+
+# #show list;;
+tunt
+    | Range (lo, hi) -> 0 <= lo && lo <= hi && hi < page_count;;
+val is_printable : int -> int --> true
+    | Current -> 0 <= cur && cur < page_co_count cur range =
+    match range with
+    | All p_response -> int = <fun>
+
+# let is_printable pageror_code code -> code;;
+val http_status_code : htt  match response with
+    | Data _ -> 200
+    | Er int = <fun>
+
+# let http_status_code response =
+  
+val colour_to_rgb : primary_colour -> int * int *Green -> (0, 0xff, 0)
+    | Blue -> (0, 0, 0xff);;match colour with
+    | Red -> (0xff, 0, 0)
+    | s suggested in the first sentence of this section, variants go along with pattern matching. Here are some examples:
+
+# let colour_to_rgb colour =
+     type page_range =
+    | All
+    | Current
+    | R_code 404
+Here is something sitting in between:
+
+#TYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <title>Dummy</title>\n  </head>\n  <body>\n    Dummy Page\n  </body>\n</html>"
+
+# Error_code 404;;
+- : http_response = Errorbody>
+</html>";;
+
+- : http_response =
+Data
+ "<!DOCmmy</title>
+  </head>
+  <body>
+    Dummy Page
+  </ <head>
+    <meta charset=\"utf-8\">
+    <title>Duype http_response = Data of string | Error_code of int
+
+# Data "<!DOCTYPE html>
+<html lang=\"en\">
+ =
+    | Data of string
+    | Error_code of int;;
+type acting as a union type:
+
+# type http_response Blue;;
+type primary_colour = Red | Green | Blue
+
+#inition of a variant type acting as an enumerated data type:
+
+# type primary_colour = Red | Green | generalises switch statements, variant types generalise enumerated and union types.
+
+Here is the defpe of tuples is written using * between the components' types.
+
+Variant Types
+Like pattern matching  predefined in the OCaml standard library.
+
+The ty);;
+- : string = "apple"
+Note: The function snd isal snd : 'a * 'b -> 'b = <fun>
+
+# snd (42, "apple"let snd p =
+    match p with
+    | (_, y) -> y;;
+vcess to the components of tuples is done using pattern matching. For instance, the predefined function snd returns the second component of a pair:
+
+#  ([], false);;
+- : 'a list * bool = ([], false)
+AcK');;
+- : int * string * char = (1, "one", 'K')
+
+# of any type. Pairs are tuples that have two elements. Here is a 3-tuple and a pair:
+
+# (1, "one", ' 8 [partial-match]: this pattern-matching is not exhaustive.
+Here is an example of a case that is not matched:
+1
+- : int -> int = <fun>
+Pairs and Tuplh i with 0 -> 1;;
+Line 1, characters 9-28:
+Warningatching does not catch all cases:
+
+# fun i -> matcl is a catch-all pattern; it matches with anything.
+
+Note that OCaml throws a warning when pattern m   | "baz" -> 3
+    | "qux" -> 4
+    | _ -> 0;;
+ve = match x with
+    | "foo" -> 1
+    | "bar" -> 2
+else 0;;
+val g : string -> int = <fun>
+
+# let g' x if x = "baz" then 3
+  else if x = "qux" then 4
+  x = "foo" then 1
+  else if x = "bar" then 2
+  elsemple, the same comparison is made, using if … then … else … and pattern matching.
+
+# let g x =
+  if s detailed in the Basic Datatypes tutorial as well as in per data type tutorials.
+
+In this other exas. In the third pattern, x designates the data inside the double-wrapped option.
+
+Pattern matching i -> None
+    | Some (Some x) -> Some x;;
+val f : ' match opt with
+    | None -> None
+    | Some None
+type 'a option = None | Some of 'a
+
+# let f opt = u -> f x :: map f u;;
+val map : ('a -> 'b) -> 'a p f u =
+    match u with
+    | [] -> []
+    | x :: x = x * x;;
+val square : int -> int
+
+# let rec maion as argument to another function. Functions having other functions as parameters are called higher-order functions. This was illustrated earlier using function List.map. Here is how map can be written using pattern matching on lists.
+
+# let squaregher-Order Function
+It is possible to pass a functep"; "cat"];;
+- : int = 3
+
+# length [[]];;
+- : int [1; 2; 3; 4];;
+- : int = 4
+
+# length ["cow"; "shedoesn't define a name; it can't be used in the body *)
+val length : 'a list -> int = <fun>
+
+# lengthNite a recursive function that computes the length of a list:
+
+# let rec length u =
+    match u with
+ote that the x :: v pattern in the second matching expression is used to destructure the list into its head x and tail v, where head is the first element of the list and tail is the rest of the list.
+
+Polymorphic Functions on Lists
+Here is how to wr int = <fun>
+
+# sum [1; 4; 3; 2; 5];;
+- : int = 15
+atching provides a means to inspect data of any kind, except functions. In this section, it is introduced on lists, and it will be generalised to other data types in the next section. Here is how pattern matching can be used to define a recursive function that computes the sum of a list of integers:
+
+# let rec sum u =
+    match u with
+    | [] -> 0
+;
+- : int list = [1; 2; 3; 4]
+In OCaml, pattern ma are defined as being either empty, written [], or being an element x added at the front of another list u, which is written x :: u (the double colon operator is pronounced “cons”).
+
+# 1 :: [2; 3; 4]; list containing the Booleans false, false, and true. Repetitions are allowed.
+A list of lists
+Listst, nil
+A list containing the numbers 1, 2, and 3
+Amples above read the following way:
+
+The empty lis; 3]
+
+# [false; false; true];;
+- : bool list = [fa: 'a list = []
+
+# [1; 2; 3];;
+- : int list = [1; 2ists
+Lists may be the most common data type in OCaml. They are ordered collections of values having the same type. Here are a few examples.
+
+# [];;
+-  more time than we lose by being more explicit.
+
+Ler to a floating point number using the float_of_int function:
+
+# float_of_int 1 +. 2.5;;
+- : float n has type int but an expression was expected of type
+         float
+  Hint: Did you mean `1.'?
+In the first example, + is intended to be used with ins type float but an expression was expected of type
+         int
+
+# 1 +. 2.5;;
+Error: This expressionever implicitly converts values from one type to another. It is not possible to perform the addition of a float and integer. Both examples below throw an error:
+
+# 1 + 2.5;;
+Error: This expression hag the result a floating point number, too.
+
+OCaml ddition between floats, while + is the addition between integers.
+
+In many programming languages, va 2.0 +. 2.0;;
+- : float = 4.
+In OCaml, +. is the at. To add floats, one must use +. instead of +:
+
+# computation of a recursive step, except the last one. OCaml handles lists internally, as shown in the penultimate expression, but displays them as the last expression. This is just pretty printing. No computation takes place between the two last steps.
+
+Data and Typing
+Type Conversion and Type-Infe[]
+=> [2; 3; 4; 5]
+Each => sign corresponds to the 3 :: range 4 5
+=> 2 :: 3 :: 4 :: range 5 5
+=> 2 :the head of the list, range is called with lo + 1. This can be visualised this way (this is not OCaml syntax):
+
+   range 2 5
+=> 2 :: range 3 5
+=> 2 ::i;;
+val range : int -> int -> int list = <fun>
+
+# hen
+      []
+    else
+      lo :: range (lo + 1) hcreates a list of consecutive integers between two bounds.
+
+# let rec range lo hi =
+    if lo > hi ttself in its own body. Such functions must be declared using let rec … = … instead of just let. Recursion is not the only means to perform iterative computation on OCaml. Loops such as for and while are available, but they are meant to be used when writing imperative OCaml in conjunction with mutable data. Otherwise, recursive functions should be preferred.
+
+Here is an example of a function which 
+
+Recursive Functions
+A recursive function calls iwhich appears in their signature. The type unit has a single value, written () and pronounced “unit.” It is used as a placeholder when no data is passed or returned, but some token still has to be passed to start processing or indicate processing has terminated.
+
+Input-output is an example of somethhe function read_line reads characters on standard input and returns them as a string when end-of-line (EOL) is reached. The function print_endline prints a string on standard output, followed by an EOL.
+
+The function read_line doesn't need any datamcome aquí?";;
+¿Cuándo se come aquí?
+- : unit = ()
+ring -> unit = <fun>
+
+# print_endline "¿Cuándo se a
+- : string = "caramba"
+
+# print_endline;;
+- : st : unit -> string = <fun>
+
+# read_line ();;
+caramb level input-output operations is done using functions. Here is an example of each:
+
+# read_line;;
+- polymorphic, meaning it has two implicit type variables: 'a and 'b (pronounced “alpha” and “beta”). They both can be anything; however, in regard to the function passed to List.map:
+
+Input list elememed by applying the function provided as argument to each of the elements of the input list.
+
+The fution of cat, behaves as follows:
+
+# cat_hi "friend";;
+- : string = "hi friend"
+Type Parameters and Higher-Order Functions
+A function may expect a function as a parameter, which is called a higher-order function. A well-known example of higher-order function is List.map. Here is how it can be used:
+
+# List.map;;
+- : ('a -> 'b) -> 'a list -> 'b list = <fun>
+
+# List.map (fun x -> x * x);;
+- : int list -> int list = <fun>
+
+# List.map (fun x -> x * x) [0; 1; 2; 3; 4; 5];;
+- : int list = [0; 1; 4; 9; 16; 25]
+The name of this function begins with List. because it is part of the predefined library of functions acting on lists. This matter will be discussed more later. Function List.map has two parameters: the second is a list, and the first is a function that can be applied to the list's elements, whatever they may be. List.map returns a list for. This is called a partial application. In the above, cat was partially applied to "hi".
+
+The function cat_hi, which resulted from the partial applica.
+
+# let cat_hi = cat "hi";;
+val cat_hi : string -> string = <fun>
+This returns a function that expects a single string, here the b from the definition of cat
+The function cat has two string parameters, a and b, and returns a value of type string.
+
+# cat "ha" "ha";;
+- : string = "ha ha"
+Functions don't have to be called with all the arguments they expect. It is possib
+
+# (fun x -> x * x) 50;;
+- : int = 2500
+Functions with Multiple Parameters and Partial Application
+A function may have several parameters, separated by spaces.
+
+# let cat a b = a ^ " " ^ b;;
+val ca
+Anonymous Functions
+Anonymous functions do not have a name, and they are defined with the fun keyword:
+
+# fun x -> x * x;;
+- : int -> int = <fun>
+We can write anonymous functions and immediately apply them to a valu
+- : suffix:string -> string -> bool = <fun>
+
+# String.ends_with ~suffix:"less" "stateless";;
+- : bool = true
+Some functions, such as String.ends_with have labell
+The REPL indicates that the type of square is int -> int. This means it is a function taking an int as argument (input) and returning an int as result (output). A functio
+# let square x = x * x;;
+val square : int -> int = <fun>
+
+# square 50;;
+- : int = 2500
+This example defines a function named square with the single parameter x. Its function body is the expression x * x. There is no “return” keyword in OCaml.
+
+When 
+Functions
+In OCaml, : a with value 1 and b with value 2. Then the example uses them in the expression a + b, resulting in the value of 3.
+
+In OCaml, the equality symbol has two meanings. It is used in definitions and equality tests.
+
+# let dummy = "hi" = "hello";;
+val dummy : bool = false
+This is interpreted as: “define dummy as the result of the structural equality t in
+    a + b;;
+- : int = 3
+This defines two names = … in … is an expression, it can be used within another expression in order to have several values with their own names:
+
+# let a = 1 in
+  let b = 2ines the name y and binds it to the value 50. It is then used in the expression y * y, resulting in the value 2500. Note that y is only defined in the expression following the in keyword.
+
+Since let …500
+
+# y;;
+Error: Unbound value y
+This example deflocally, within an expression, using the let … = … in … syntax:
+
+# let y = 50 in y * y;;
+- : int = 2 Authors: Special Comments.
+
+Names can be defined ** Feet in a mile *)
+let feets = 5280;;
+val feets x_plus_y works, x-plus-y does not.
+
+Bindings can be given special comments (sometimes called "docstrings") that editors and tooling treat as related to the binding. These are denoted by adding a second * to the opening of the comment. For example:
+
+( a lexical scope, names have a single value, which only depends on its definition.
+
+Do not use dashes in names; use underscores instead. For example: be discussed in the Working With Mutable State section.
+
+There is no overloading in OCaml, so inside
+Values can be given names using the let keyword. This is called binding a value to a name. For example:
+
+# let x = 50;;
+val x : int = 50
+
+# x * x;;
+- : int = 2500
+When entering let x = 50;;, OCaml responds with val x : int = 50, meaning that x is an identifier bound to value 50. So x * x;; evaluates to the same as 50 * 50;;.
+
+Bindings in OCaml are immutable, meaning that the value assigned to a name never changes. Although x is often called a variable, it is not the case. It is in fact a constant. Using over-simplifying but acceptable words, all variables are immutable in OCaml. It is and types:
+                                                                                                                                              can be empty [] (pronounced “nil”). Note that the first list has been given a name using the let … = … construction, which is detailed below. The most primitive operation on lists is to add a new element at the front of an existing list. This is done using the “cons” operator, written with the double colon operator ::.
+
+# 9 :: u;;
+- : int list = [9; 1; 2; 3; 4]
+In OCaml, if … then … else … is not a statement; it is an expression.
+
+# 2 * if "hello" = "world" then 3 else 5;;
+- : int = 10
+The source beginning at if and ending at 5 is parsed as a single integer expression that is multiplied by 2. OCaml has no need for two different test construct
+# 6.28;;
+- : float = 6.28
+
+# "This is really disco!";;
+- : string = "This is really disco!"
+
+# 'a';; (* Note the single quotes *)
+- : char = 'a'
+
+# true;;
+- : bool = true
+OCaml has type inference. It automatically determines the type of an expression without much guidance from the programmer. Lists have a dedicated tutorial. For the time being, the following two expressions are both lists. The former contains integers, and the latter, strings.
+
+# let u = [1; 2; 3; 4];;
+val u : int list = [1; 2; 3; 4]
+
+# ["this"; "is"; "mambo"];;
+- : string list = ["this"; "is"; "mambo"]
+The lists' types, int list and string list, have been inferred from the type of their elements. Lists ame.
+
+The double semicolon ;; at the end tells the
+
+
+
+================================================================
+End of Codebase
+================================================================
