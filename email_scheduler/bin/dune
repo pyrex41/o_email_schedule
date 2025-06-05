@@ -1,0 +1,4 @@
+(executable
+ (public_name email_scheduler)
+ (name main)
+ (libraries email_scheduler))
