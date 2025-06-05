@@ -5,7 +5,8 @@
       "Bash(mkdir:*)",
       "Bash(ls:*)",
       "Bash(opam list:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

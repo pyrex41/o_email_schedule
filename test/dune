@@ -1,3 +1,7 @@
 (test
  (name test_scheduler_simple)
  (libraries scheduler))
+
+(test
+ (name test_advanced_features)
+ (libraries scheduler))
