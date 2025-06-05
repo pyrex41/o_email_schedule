@@ -1,0 +1,609 @@
+A Tour of OCaml · OCaml Documentation
+A Tour of OCaml
+This tutorial introduces OCaml's basic features: values, expressions, lists, functions, pattern matching, and more.
+
+No OCaml or any functional programming knowledge is required; however, it is assumed the reader has some basic software development knowledge. Please ensure you've installed OCaml and set up the environment, as described on the Install OCaml page.
+
+We recommend that you execute the examples we provide, and to experiment with them, to get a feel for coding in OCaml. To do this, you can use UTop (Universal Toplevel).
+
+UTop allows users to interact with OCaml by reading and evaluating OCaml phrases, like expressions or value definitions, and printing the result on the screen. Use the utop command to run UTop. Exit it by pressing Ctrl+D. For more information, you can read the Introduction to the OCaml Toplevel.
+
+Some of the examples in this tour include comments. Comments in OCaml start with (* and end with *) and can be nested. Since they are ignored by OCaml, they can be used anywhere whitespace is permitted. When entering the code below into UTop, the comments can be left out. Here are some examples:
+
+(* Here is a comment *)
+(* Outside of the nested comment is still a comment. (* Here is a nested comment *) Outside of the nested comment again. *)
+# 50 + (* A comment in between parts of an expression *) 50;;
+- : int = 100
+Expressions and Definitions
+Let's start with a simple expression:
+
+# 50 * 50;;
+- : int = 2500
+In OCaml, everything has a value, and every value has a type. The above example says, “50 * 50 is an expression that has type int (integer) and evaluates to 2500.” Since it is an anonymous expression, the character - appears instead of a n toplevel to evaluate and print the result of the given phrase.
+
+Here are examples of other primitive values possible to give names to values that can be updated. In OCaml, this is called a reference and will ions. The ternary conditional operator and the if … then … else … are the same. Also note parentheses are not needed here, which is often the case in OCaml.
+                                                           : int = 5280
+This is discussed further in odoc forest between the strings "hi" and "hello".” OCaml also has a double equal operator ==, which stands for physical equality, but it is not used in this tutorial. The operator <> is the negation of =, while != is the negation of ==.
+                                            since everything is a value, functions are values too. Functions are defined using the let keyword:
+                                                   square is applied to 50, it evaluates x * x into 50 * 50, which leads to 2500.
+                                                           n value can't be displayed, which is why <fun> is printed instead.
+                                                                  ed parameters. Labels are useful when a function h
+# String.ends_with;;                                                     as several parameters of the same type; naming arguments allows to guess their purpose. Above, ~suffix:"less" indicates "less" is passed as labelled argument suffix. Labelled arguments are detailed in the Labelled Arguments tutorial.
+e:t : string -> string -> string = <fun>le to only pass a to cat without passing bnction List.map can be applied on any kind of list. Here it is given a list of integers, but it could be a list of floats, strings, or anything. This is known as polymorphism. The List.map function isnts have the same type of its input.
+Output list elements have the same type of its output.
+Side-Effects and the unit Type
+Performing operating systeT to proceed, and the function print_endline doesn't have any meaningful data to return. Indicating this absence of data is the role of the unit type, ing taking place when executing a function but which does not appear in the function type. This is called a side-effect and does not stop at I/O. The unit type is often used to indicate the presence of side-effects, although it's not always the case.range 2 5;;
+- : int list = [2; 3; 4; 5]
+As indicated by its type int -> int -> int list, the function range takes two integers as arguments and returns a list of integers as result. The first int parameter, lo, is the range's lower bound; the second int parameter, hi, is the higher bound. If lo > hi, the empty range is returned. That's the first branch of the if … then … else expression. Otherwise, the lo value is prepended to the list created by calling range itself; this is recursion. Prepending is achieved using ::, the cons operator in OCaml. It constructs a new list by adding an element at the front of an existing list. Progress is made at each call; since lo has just been prepended at : 3 :: 4 :: 5 :: range 6 5
+=> 2 :: 3 :: 4 :: 5 :: rence
+OCaml has floating-point values of type floalues can be automatically converted from one type into another. This includes implicit type conversion and promotion. For example, in such a language, if you write 1 + 2.5, the first argument (an integer) is promoted to a floating point number, makintegers, so it can't be used with the 2.5 float. In the second example, +. is intended to be used with floats, so it can't be used with the 1 integer.
+
+In OCaml you need to explicitly convert the integ= 3.5
+There are several reasons why OCaml requires explicit conversions. Most importantly, it enables types to be worked out automatically. OCaml's type inference algorithm computes a type for each expression and requires very little annotation, in comparison to other languages. Arguably, this saveslse; false; true]
+
+# [[1; 2]; [3]; [4; 5; 6]];;
+- : int list list = [[1; 2]; [3]; [4; 5; 6]]
+The ex    | x :: v -> x + sum v;;
+val sum : int list ->    | [] -> 0
+    | _ :: v -> 1 + length v;; (* _  = 1
+This function operates not just on lists of integers but on any kind of list. It is a polymorphic function. Its type indicates input of type 'a list where 'a is a type variable standing for any type. The empty list pattern [] can be of any element type. So the _ :: v pattern, as the value at the head of the list, is irrelevant because the _ pattern indicates it is not inspected. Since both patterns must be of the same type, the typing algorithm infers the 'a list -> int type.
+
+Defining a Hilist -> 'b list = <fun>
+
+# map square [1; 2; 3; 4;];;
+- : int list = [1; 4; 9; 16]
+Pattern Matching, Cont'd
+Pattern matching isn't limited to lists. Any kind of data can be inspected using it, except functions. Patterns are expressions that are compared to an inspected value. It could be performed using if … then … else …, but pattern matching is more convenient. Here is an example using the option data type that will be detailed in the Modules and the Standard Library section.
+
+# #show option;;a option option-> 'a option = <fun>
+The inspected value is opt of type option. It is compared against the patterns from top to bottom. If opt is the None option, it is a match with the first pattern. If opt is the Some None option, it's a match with the second pattern. If opt is a double-wrapped option with a value, it's a match with the third pattern. Patterns can introduce names, just as let do al g' : string -> int = <fun>
+The underscore symboes
+Tuples are fixed-length collections of elements [Red; Blue; Red];;
+- : primary_colour list = [Red; Blue; Red]
+Here is the definition of a variant tange of int * int;;
+type page_range = All | Current | Range of int * int
+In the previous definitions, the capitalised identifiers are called constructors. They allow the creation of variant values. This is unrelated to object-oriented programming.
+
+A> page_range -> bool = <fun>
+Like a function, a vaype 'a list = [] | (::) of 'a * 'a list
+As previouments of several types together. However, each element is given a name. Like variant types, records types must be defined before being used. Here are examples of a record type, a value, access to a component, and pattern matching on the same record.
+ ard : person = {first_name = "Gérard"; surname = "Huet"; age = 76}
+When defining gerard, no type needs to be declared. The type checker will search for a record which has exactly three fields with matching names and types. Note that there are no typing relationships between records. It is not possible to declare a record type that extends another by adding fields. Record type search will succeed in with
+    | { age = x; _ } -> 13 <= x && x <= 19;eenager gerard;;
+- : bool = false
+Here, the patterutable State
+OCaml supports imperative programming. Usually, the let … = … syntax does not define variables, it defines constants. However, mutable variables exist in OCaml. They are called references. Here's how we create a reference to an integer:
+
+# let r = ref 0;;
+val r : int ref = {contents = #as used earlier in this section is also part of a 'b) -> 'a list -> 'b list = <fun>
+
+# List.map (funtutorial, OCaml was used interactively. The next tutorial, Your First OCaml Program, shows you how to write OCaml files, how to compile them, and how to kickstart a project.w for efficient separate compilation. This is illustrated in the next tutorial.
+
+Conclusion
+In this is illustrates the first feature of the OCaml module system. It provides a means to separate concerns by preventing name clashes. Two functions having different type may have the same name if they are provided by different modules.
+
+Modules also allo x -> x * x);;
+- : int list -> int list = <fun>
+Thmodule, the List module.
+
+# List.map;;
+- : ('a -> s an actual value (i.e., it is Some something), it applies the provided function and returns its result wrapped in an option. When the option value provided doesn't contain anything (i.e., it is None), the result doesn't contain anything as well (i.e., it is None too).
+
+The List.map function which with Some 8.
+When the option value provided containcation, only pass fun x -> x * x. Check the type of the resulting function.
+Apply with None.
+Apply wy its type. It has two parameters: a function of type 'a -> 'b and an 'a option.
+Using partial appliption.map is illustrated in several steps.
+
+Displaint option = Some 64
+Here, usage of the function Oone
+
+# Option.map (fun x -> x * x) (Some 8);;
+- : ion.map (fun x -> x * x) None;;
+- : int option = N* x);;
+- : int option -> int option = <fun>
+
+# Opton -> 'b option = <fun>
+
+# Option.map (fun x -> x ed to by adding the module name as a prefix to their name.
+
+# Option.map;;
+- : ('a -> 'b) -> 'a optit
+  end
+Definitions provided by modules are referr: 'a t -> 'a list
+    val to_seq : 'a t -> 'a Seq.one:'e -> 'a t -> ('a, 'e) result
+    val to_list  int) -> 'a t -> 'a t -> int
+    val to_result : na t -> 'a t -> bool
+    val compare : ('a -> 'a -> t -> bool
+    val equal : ('a -> 'a -> bool) -> '   val is_none : 'a t -> bool
+    val is_some : 'a-> 'a t
+    val map : ('a -> 'b) -> 'a t -> 'b t
+    val fold : none:'a -> some:('b -> 'a) -> 'b t -> 'a
+    val iter : ('a -> unit) -> 'a t -> unit
+ a t -> ('a -> 'b t) -> 'b t
+    val join : 'a t t 'a -> 'a
+    val get : 'a t -> 'a
+    val bind : 'some : 'a -> 'a t
+    val value : 'a t -> default:n = None | Some of 'a
+    val none : 'a t
+    val n;;
+module Option :
+  sig
+    type 'a t = 'a optio something called modules. A module is a group of definitions. The standard library is a set of modules available to all OCaml programs. Here are how the definitions contained in the Option module of the standard library can be listed:
+
+# #show Optiorary
+Organising source code in OCaml is done usingis behaviour is the same as in an imperative language. However, although ; is not defined as a function, it behaves as if it were a function of type unit -> unit -> unit.
+
+Modules and the Standard Libntents of the reference text on standard output
+Th the contents of the reference text
+Display the cots of the reference text on standard output
+Updatethat occur in the second line:
+
+Display the contenlo world!
+- : unit = ()
+Here are the side effects !text; text := "world!"; print_endline !text;;
+heltring ref = {contents = "hello "}
+
+# print_string other with the ; operator. Writing a; b means: execute a. Once done, execute b, only returns the value of b.
+
+# let text = ref "hello ";;
+val text : s !r;;
+- : int = 42
+Execute an expression after an0ing the content of a reference is a side-effect.
+
+= 42;;
+- : unit = ()
+This returns () because changt's update the content of r. Here := is the assignment operator; it is pronounced “receives”.
+
+# r :e different types: int and int ref, respectively. Just like it is not possible to perform multiplication of an integer and a float, it is not possible to update an integer or multiply a reference.
+
+Leitialised or null reference. The r reference is initialised with the integer zero. Accessing a reference's content is done using the ! de-reference operator.
+
+# !r;;
+- : int = 0
+Note that !r and r hav}
+It is syntactically impossible to create an unin-> n
+  | Error _ -> 0;;
+- : int = 0
+Working with M Error "Sorry"
+
+# match id_42_res 0 with
+  | Ok n  Ok 42
+
+# id_42_res 0;;
+- : (int, string) result =<fun>
+
+# id_42_res 42;;
+- : (int, string) result =_42_res n = if n <> 42 then Error "Sorry" else Ok n;;
+val id_42_res : int -> (int, string) result = Ok of 'a | Error of 'b
+So one may write:
+
+# let idr way to deal with errors in OCaml is by returning value of type result, which can represent either the correct result or an error. Here is how it is defined:
+
+# #show result;;
+type ('a, 'b) result = es several predefined exceptions. It is possible to define exceptions.
+
+Using the result Type
+Anothee _ -> 0;;
+- : int = 0
+The standard library provid … with … construction:
+
+# try id_42 0 with Failurnction types.
+
+Exceptions are caught using the try "Sorry".
+Note that exceptions do not appear in fu 42;;
+- : int = 42
+
+# id_42 0;;
+Exception: Failuret id_42 n = if n <> 42 then raise (Failure "Sorry") else n;;
+val id_42 : int -> int = <fun>
+
+# id_42eptions are raised using the raise function.
+
+# len is interrupted, an exception is thrown. For instance:
+
+# 10 / 0;;
+Exception: Division_by_zero.
+Excn { age = x; _ } is typed with the most recently declared record type that has an age field of type int. The type int is inferred from the expression 13 <= x && x <= 19. The function is_teenager will only work with the found record type, here person.
+
+Dealing With Errors
+Exceptions
+When a computatio;
+val is_teenager : person -> bool = <fun>
+
+# is_t"Huet"
+
+# let is_teenager person =
+    match persof it finds an exact match and fails in any other case.
+
+# let s = gerard.surname;;
+val s : string =     surname = "Huet";
+     age = 76
+  };;
+val ger { first_name : string; surname : string; age : int; }
+
+# let gerard = {
+     first_name = "Gérard";
+rname : string;
+    age : int
+  };;
+type person = 
+# type person = {
+    first_name : string;
+    susly shown, sum, length, and map functions provide examples of pattern matching over the list variant type.
+
+Records
+Like tuples, records also pack eleriant can be recursive if it refers to itself in its own definition. The predefined type list provides an example of such a variant:
+
+# #show list;;
+tunt
+    | Range (lo, hi) -> 0 <= lo && lo <= hi && hi < page_count;;
+val is_printable : int -> int --> true
+    | Current -> 0 <= cur && cur < page_co_count cur range =
+    match range with
+    | All p_response -> int = <fun>
+
+# let is_printable pageror_code code -> code;;
+val http_status_code : htt  match response with
+    | Data _ -> 200
+    | Er int = <fun>
+
+# let http_status_code response =
+  
+val colour_to_rgb : primary_colour -> int * int *Green -> (0, 0xff, 0)
+    | Blue -> (0, 0, 0xff);;match colour with
+    | Red -> (0xff, 0, 0)
+    | s suggested in the first sentence of this section, variants go along with pattern matching. Here are some examples:
+
+# let colour_to_rgb colour =
+     type page_range =
+    | All
+    | Current
+    | R_code 404
+Here is something sitting in between:
+
+#TYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <title>Dummy</title>\n  </head>\n  <body>\n    Dummy Page\n  </body>\n</html>"
+
+# Error_code 404;;
+- : http_response = Errorbody>
+</html>";;
+
+- : http_response =
+Data
+ "<!DOCmmy</title>
+  </head>
+  <body>
+    Dummy Page
+  </ <head>
+    <meta charset=\"utf-8\">
+    <title>Duype http_response = Data of string | Error_code of int
+
+# Data "<!DOCTYPE html>
+<html lang=\"en\">
+ =
+    | Data of string
+    | Error_code of int;;
+type acting as a union type:
+
+# type http_response Blue;;
+type primary_colour = Red | Green | Blue
+
+#inition of a variant type acting as an enumerated data type:
+
+# type primary_colour = Red | Green | generalises switch statements, variant types generalise enumerated and union types.
+
+Here is the defpe of tuples is written using * between the components' types.
+
+Variant Types
+Like pattern matching  predefined in the OCaml standard library.
+
+The ty);;
+- : string = "apple"
+Note: The function snd isal snd : 'a * 'b -> 'b = <fun>
+
+# snd (42, "apple"let snd p =
+    match p with
+    | (_, y) -> y;;
+vcess to the components of tuples is done using pattern matching. For instance, the predefined function snd returns the second component of a pair:
+
+#  ([], false);;
+- : 'a list * bool = ([], false)
+AcK');;
+- : int * string * char = (1, "one", 'K')
+
+# of any type. Pairs are tuples that have two elements. Here is a 3-tuple and a pair:
+
+# (1, "one", ' 8 [partial-match]: this pattern-matching is not exhaustive.
+Here is an example of a case that is not matched:
+1
+- : int -> int = <fun>
+Pairs and Tuplh i with 0 -> 1;;
+Line 1, characters 9-28:
+Warningatching does not catch all cases:
+
+# fun i -> matcl is a catch-all pattern; it matches with anything.
+
+Note that OCaml throws a warning when pattern m   | "baz" -> 3
+    | "qux" -> 4
+    | _ -> 0;;
+ve = match x with
+    | "foo" -> 1
+    | "bar" -> 2
+else 0;;
+val g : string -> int = <fun>
+
+# let g' x if x = "baz" then 3
+  else if x = "qux" then 4
+  x = "foo" then 1
+  else if x = "bar" then 2
+  elsemple, the same comparison is made, using if … then … else … and pattern matching.
+
+# let g x =
+  if s detailed in the Basic Datatypes tutorial as well as in per data type tutorials.
+
+In this other exas. In the third pattern, x designates the data inside the double-wrapped option.
+
+Pattern matching i -> None
+    | Some (Some x) -> Some x;;
+val f : ' match opt with
+    | None -> None
+    | Some None
+type 'a option = None | Some of 'a
+
+# let f opt = u -> f x :: map f u;;
+val map : ('a -> 'b) -> 'a p f u =
+    match u with
+    | [] -> []
+    | x :: x = x * x;;
+val square : int -> int
+
+# let rec maion as argument to another function. Functions having other functions as parameters are called higher-order functions. This was illustrated earlier using function List.map. Here is how map can be written using pattern matching on lists.
+
+# let squaregher-Order Function
+It is possible to pass a functep"; "cat"];;
+- : int = 3
+
+# length [[]];;
+- : int [1; 2; 3; 4];;
+- : int = 4
+
+# length ["cow"; "shedoesn't define a name; it can't be used in the body *)
+val length : 'a list -> int = <fun>
+
+# lengthNite a recursive function that computes the length of a list:
+
+# let rec length u =
+    match u with
+ote that the x :: v pattern in the second matching expression is used to destructure the list into its head x and tail v, where head is the first element of the list and tail is the rest of the list.
+
+Polymorphic Functions on Lists
+Here is how to wr int = <fun>
+
+# sum [1; 4; 3; 2; 5];;
+- : int = 15
+atching provides a means to inspect data of any kind, except functions. In this section, it is introduced on lists, and it will be generalised to other data types in the next section. Here is how pattern matching can be used to define a recursive function that computes the sum of a list of integers:
+
+# let rec sum u =
+    match u with
+    | [] -> 0
+;
+- : int list = [1; 2; 3; 4]
+In OCaml, pattern ma are defined as being either empty, written [], or being an element x added at the front of another list u, which is written x :: u (the double colon operator is pronounced “cons”).
+
+# 1 :: [2; 3; 4]; list containing the Booleans false, false, and true. Repetitions are allowed.
+A list of lists
+Listst, nil
+A list containing the numbers 1, 2, and 3
+Amples above read the following way:
+
+The empty lis; 3]
+
+# [false; false; true];;
+- : bool list = [fa: 'a list = []
+
+# [1; 2; 3];;
+- : int list = [1; 2ists
+Lists may be the most common data type in OCaml. They are ordered collections of values having the same type. Here are a few examples.
+
+# [];;
+-  more time than we lose by being more explicit.
+
+Ler to a floating point number using the float_of_int function:
+
+# float_of_int 1 +. 2.5;;
+- : float n has type int but an expression was expected of type
+         float
+  Hint: Did you mean `1.'?
+In the first example, + is intended to be used with ins type float but an expression was expected of type
+         int
+
+# 1 +. 2.5;;
+Error: This expressionever implicitly converts values from one type to another. It is not possible to perform the addition of a float and integer. Both examples below throw an error:
+
+# 1 + 2.5;;
+Error: This expression hag the result a floating point number, too.
+
+OCaml ddition between floats, while + is the addition between integers.
+
+In many programming languages, va 2.0 +. 2.0;;
+- : float = 4.
+In OCaml, +. is the at. To add floats, one must use +. instead of +:
+
+# computation of a recursive step, except the last one. OCaml handles lists internally, as shown in the penultimate expression, but displays them as the last expression. This is just pretty printing. No computation takes place between the two last steps.
+
+Data and Typing
+Type Conversion and Type-Infe[]
+=> [2; 3; 4; 5]
+Each => sign corresponds to the 3 :: range 4 5
+=> 2 :: 3 :: 4 :: range 5 5
+=> 2 :the head of the list, range is called with lo + 1. This can be visualised this way (this is not OCaml syntax):
+
+   range 2 5
+=> 2 :: range 3 5
+=> 2 ::i;;
+val range : int -> int -> int list = <fun>
+
+# hen
+      []
+    else
+      lo :: range (lo + 1) hcreates a list of consecutive integers between two bounds.
+
+# let rec range lo hi =
+    if lo > hi ttself in its own body. Such functions must be declared using let rec … = … instead of just let. Recursion is not the only means to perform iterative computation on OCaml. Loops such as for and while are available, but they are meant to be used when writing imperative OCaml in conjunction with mutable data. Otherwise, recursive functions should be preferred.
+
+Here is an example of a function which 
+
+Recursive Functions
+A recursive function calls iwhich appears in their signature. The type unit has a single value, written () and pronounced “unit.” It is used as a placeholder when no data is passed or returned, but some token still has to be passed to start processing or indicate processing has terminated.
+
+Input-output is an example of somethhe function read_line reads characters on standard input and returns them as a string when end-of-line (EOL) is reached. The function print_endline prints a string on standard output, followed by an EOL.
+
+The function read_line doesn't need any datamcome aquí?";;
+¿Cuándo se come aquí?
+- : unit = ()
+ring -> unit = <fun>
+
+# print_endline "¿Cuándo se a
+- : string = "caramba"
+
+# print_endline;;
+- : st : unit -> string = <fun>
+
+# read_line ();;
+caramb level input-output operations is done using functions. Here is an example of each:
+
+# read_line;;
+- polymorphic, meaning it has two implicit type variables: 'a and 'b (pronounced “alpha” and “beta”). They both can be anything; however, in regard to the function passed to List.map:
+
+Input list elememed by applying the function provided as argument to each of the elements of the input list.
+
+The fution of cat, behaves as follows:
+
+# cat_hi "friend";;
+- : string = "hi friend"
+Type Parameters and Higher-Order Functions
+A function may expect a function as a parameter, which is called a higher-order function. A well-known example of higher-order function is List.map. Here is how it can be used:
+
+# List.map;;
+- : ('a -> 'b) -> 'a list -> 'b list = <fun>
+
+# List.map (fun x -> x * x);;
+- : int list -> int list = <fun>
+
+# List.map (fun x -> x * x) [0; 1; 2; 3; 4; 5];;
+- : int list = [0; 1; 4; 9; 16; 25]
+The name of this function begins with List. because it is part of the predefined library of functions acting on lists. This matter will be discussed more later. Function List.map has two parameters: the second is a list, and the first is a function that can be applied to the list's elements, whatever they may be. List.map returns a list for. This is called a partial application. In the above, cat was partially applied to "hi".
+
+The function cat_hi, which resulted from the partial applica.
+
+# let cat_hi = cat "hi";;
+val cat_hi : string -> string = <fun>
+This returns a function that expects a single string, here the b from the definition of cat
+The function cat has two string parameters, a and b, and returns a value of type string.
+
+# cat "ha" "ha";;
+- : string = "ha ha"
+Functions don't have to be called with all the arguments they expect. It is possib
+
+# (fun x -> x * x) 50;;
+- : int = 2500
+Functions with Multiple Parameters and Partial Application
+A function may have several parameters, separated by spaces.
+
+# let cat a b = a ^ " " ^ b;;
+val ca
+Anonymous Functions
+Anonymous functions do not have a name, and they are defined with the fun keyword:
+
+# fun x -> x * x;;
+- : int -> int = <fun>
+We can write anonymous functions and immediately apply them to a valu
+- : suffix:string -> string -> bool = <fun>
+
+# String.ends_with ~suffix:"less" "stateless";;
+- : bool = true
+Some functions, such as String.ends_with have labell
+The REPL indicates that the type of square is int -> int. This means it is a function taking an int as argument (input) and returning an int as result (output). A functio
+# let square x = x * x;;
+val square : int -> int = <fun>
+
+# square 50;;
+- : int = 2500
+This example defines a function named square with the single parameter x. Its function body is the expression x * x. There is no “return” keyword in OCaml.
+
+When 
+Functions
+In OCaml, : a with value 1 and b with value 2. Then the example uses them in the expression a + b, resulting in the value of 3.
+
+In OCaml, the equality symbol has two meanings. It is used in definitions and equality tests.
+
+# let dummy = "hi" = "hello";;
+val dummy : bool = false
+This is interpreted as: “define dummy as the result of the structural equality t in
+    a + b;;
+- : int = 3
+This defines two names = … in … is an expression, it can be used within another expression in order to have several values with their own names:
+
+# let a = 1 in
+  let b = 2ines the name y and binds it to the value 50. It is then used in the expression y * y, resulting in the value 2500. Note that y is only defined in the expression following the in keyword.
+
+Since let …500
+
+# y;;
+Error: Unbound value y
+This example deflocally, within an expression, using the let … = … in … syntax:
+
+# let y = 50 in y * y;;
+- : int = 2 Authors: Special Comments.
+
+Names can be defined ** Feet in a mile *)
+let feets = 5280;;
+val feets x_plus_y works, x-plus-y does not.
+
+Bindings can be given special comments (sometimes called "docstrings") that editors and tooling treat as related to the binding. These are denoted by adding a second * to the opening of the comment. For example:
+
+( a lexical scope, names have a single value, which only depends on its definition.
+
+Do not use dashes in names; use underscores instead. For example: be discussed in the Working With Mutable State section.
+
+There is no overloading in OCaml, so inside
+Values can be given names using the let keyword. This is called binding a value to a name. For example:
+
+# let x = 50;;
+val x : int = 50
+
+# x * x;;
+- : int = 2500
+When entering let x = 50;;, OCaml responds with val x : int = 50, meaning that x is an identifier bound to value 50. So x * x;; evaluates to the same as 50 * 50;;.
+
+Bindings in OCaml are immutable, meaning that the value assigned to a name never changes. Although x is often called a variable, it is not the case. It is in fact a constant. Using over-simplifying but acceptable words, all variables are immutable in OCaml. It is and types:
+                                                                                                                                              can be empty [] (pronounced “nil”). Note that the first list has been given a name using the let … = … construction, which is detailed below. The most primitive operation on lists is to add a new element at the front of an existing list. This is done using the “cons” operator, written with the double colon operator ::.
+
+# 9 :: u;;
+- : int list = [9; 1; 2; 3; 4]
+In OCaml, if … then … else … is not a statement; it is an expression.
+
+# 2 * if "hello" = "world" then 3 else 5;;
+- : int = 10
+The source beginning at if and ending at 5 is parsed as a single integer expression that is multiplied by 2. OCaml has no need for two different test construct
+# 6.28;;
+- : float = 6.28
+
+# "This is really disco!";;
+- : string = "This is really disco!"
+
+# 'a';; (* Note the single quotes *)
+- : char = 'a'
+
+# true;;
+- : bool = true
+OCaml has type inference. It automatically determines the type of an expression without much guidance from the programmer. Lists have a dedicated tutorial. For the time being, the following two expressions are both lists. The former contains integers, and the latter, strings.
+
+# let u = [1; 2; 3; 4];;
+val u : int list = [1; 2; 3; 4]
+
+# ["this"; "is"; "mambo"];;
+- : string list = ["this"; "is"; "mambo"]
+The lists' types, int list and string list, have been inferred from the type of their elements. Lists ame.
+
+The double semicolon ;; at the end tells the
