@@ -1,2 +1,7 @@
 (library
- (name email_scheduler))
+ (name email_scheduler)
+ (libraries 
+   lwt
+   ptime
+   yojson
+   logs))

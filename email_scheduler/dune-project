@@ -1,4 +1,4 @@
-(lang dune 3.19)
+(lang dune 3.0)
 
 (name email_scheduler)
 
@@ -17,10 +17,14 @@
 
 (package
  (name email_scheduler)
- (synopsis "A short synopsis")
- (description "A longer description")
- (depends ocaml)
- (tags
-  ("add topics" "to describe" your project)))
+ (synopsis "OCaml Email Scheduling System")
+ (description "A sophisticated email scheduling system with state-based exclusion rules, campaign management, and load balancing")
+ (depends
+  ocaml
+  dune
+  lwt
+  ptime
+  yojson
+  logs))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html
