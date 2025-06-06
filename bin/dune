@@ -22,3 +22,8 @@
  (public_name db_scheduler)
  (name db_scheduler)
  (libraries scheduler))
+
+(executable
+ (public_name high_performance_scheduler)
+ (name high_performance_scheduler)
+ (libraries scheduler))
