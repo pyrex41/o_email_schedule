@@ -179,9 +179,8 @@ let batch_insert_schedules_transactional schedules =
       INSERT OR REPLACE INTO email_schedules (
         contact_id, email_type, event_year, event_month, event_day,
         scheduled_send_date, scheduled_send_time, status, skip_reason,
-        scheduler_run_id, created_at, updated_at
-      ) VALUES (%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s', 
-                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        batch_id
+      ) VALUES (%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')
     |} 
       schedule.contact_id
       (string_of_email_type schedule.email_type)
@@ -202,6 +201,42 @@ let batch_insert_schedules_transactional schedules =
   match execute_sql_safe transaction_sql with
   | Ok _ -> Ok (List.length schedules)
   | Error err -> Error err
+
+(* Chunked batch insert to handle large datasets *)
+let batch_insert_schedules_chunked schedules chunk_size =
+  if schedules = [] then Ok 0 else
+  
+  let rec chunk_list lst size =
+    match lst with
+    | [] -> []
+    | _ ->
+        let (chunk, rest) = 
+          let rec take n lst acc =
+            match lst, n with
+            | [], _ -> (List.rev acc, [])
+            | _, 0 -> (List.rev acc, lst)
+            | x :: xs, n -> take (n-1) xs (x :: acc)
+          in
+          take size lst []
+        in
+        chunk :: chunk_list rest size
+  in
+  
+  let chunks = chunk_list schedules chunk_size in
+  let total_inserted = ref 0 in
+  
+  let rec process_chunks remaining_chunks =
+    match remaining_chunks with
+    | [] -> Ok !total_inserted
+    | chunk :: rest ->
+        match batch_insert_schedules_transactional chunk with
+        | Ok count -> 
+            total_inserted := !total_inserted + count;
+            process_chunks rest
+        | Error err -> Error err
+  in
+  
+  process_chunks chunks
 
 (* Get sent emails for followup logic with proper filtering *)
 let get_sent_emails_for_followup lookback_days =

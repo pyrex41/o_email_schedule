@@ -95,9 +95,10 @@ let run_high_performance_scheduler db_path =
                
                (* PERFORMANCE OPTIMIZATION: Use batch insert with transactions *)
                Printf.printf "💾 Inserting schedules using high-performance batch operations...\n";
-               (match batch_insert_schedules_transactional balanced_schedules with
+               let chunk_size = 50 in  (* Safe chunk size for shell commands *)
+               (match batch_insert_schedules_chunked balanced_schedules chunk_size with
                 | Ok changes ->
-                    Printf.printf "   Successfully inserted/updated %d email schedules\n" changes;
+                    Printf.printf "   Successfully inserted/updated %d email schedules in chunks\n" changes;
                     Printf.printf "✅ High-performance scheduling complete!\n\n";
                     
                     (* Display summary statistics *)
@@ -105,7 +106,7 @@ let run_high_performance_scheduler db_path =
                     Printf.printf "   • Query-driven filtering: %d/%s contacts processed (major speedup)\n" 
                       contact_count 
                       (match get_total_contact_count () with Ok total -> string_of_int total | Error _ -> "?");
-                    Printf.printf "   • Batch database operations: %d schedules in single transaction\n" changes;
+                    Printf.printf "   • Batch database operations: %d schedules in chunked transactions\n" changes;
                     Printf.printf "   • Type-safe error handling: All operations checked at compile time\n";
                     Printf.printf "   • State exclusion rules: Applied with mathematical precision\n";
                     Printf.printf "   • Load balancing: Sophisticated smoothing algorithms applied\n";
