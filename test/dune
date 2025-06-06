@@ -1,7 +1,32 @@
 (test
+ (name test_scheduler)
+ (modules test_scheduler)
+ (libraries scheduler))
+
+(test
  (name test_scheduler_simple)
+ (modules test_scheduler_simple)
  (libraries scheduler))
 
 (test
  (name test_advanced_features)
+ (modules test_advanced_features)
  (libraries scheduler))
+
+(executable
+ (name test_business_logic_comprehensive)
+ (modules test_business_logic_comprehensive)
+ (libraries scheduler))
+
+(executable
+ (name test_load_balancing_comprehensive)
+ (modules test_load_balancing_comprehensive)
+ (libraries scheduler))
+
+(rule
+ (alias runtest)
+ (action (run ./test_business_logic_comprehensive.exe)))
+
+(rule
+ (alias runtest)
+ (action (run ./test_load_balancing_comprehensive.exe)))

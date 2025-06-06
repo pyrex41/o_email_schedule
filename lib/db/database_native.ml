@@ -1,10 +1,40 @@
 open Types
 open Simple_date
 
-(* Native high-performance database interface using proper SQLite bindings *)
+(* Native high-performance database interface with advanced optimizations *)
 
-let db_handle = ref None
+(* Connection pool for better performance *)
+type connection_pool = {
+  mutable connections: Sqlite3.db list;
+  mutable available: Sqlite3.db list;
+  max_size: int;
+  current_size: int ref;
+}
+
+let connection_pool = ref None
 let db_path = ref "org-206.sqlite3"
+
+(* Prepared statement cache for maximum performance *)
+module PreparedStmtCache = struct
+  let cache = Hashtbl.create 32
+  
+  let get_or_prepare db sql =
+    match Hashtbl.find_opt cache sql with
+    | Some stmt -> 
+        (* Reset the cached statement *)
+        ignore (Sqlite3.reset stmt);
+        stmt
+    | None ->
+        let stmt = Sqlite3.prepare db sql in
+        Hashtbl.add cache sql stmt;
+        stmt
+        
+  let clear () = 
+    Hashtbl.iter (fun _ stmt -> 
+      ignore (Sqlite3.finalize stmt)
+    ) cache;
+    Hashtbl.clear cache
+end
 
 let set_db_path path = db_path := path
 
@@ -19,66 +49,112 @@ let string_of_db_error = function
   | ParseError msg -> "Parse error: " ^ msg
   | ConnectionError msg -> "Connection error: " ^ msg
 
-(* Get or create database connection *)
+(* Initialize connection pool for maximum performance *)
+let init_connection_pool max_size =
+  let pool = {
+    connections = [];
+    available = [];
+    max_size;
+    current_size = ref 0;
+  } in
+  connection_pool := Some pool;
+  Ok ()
+
+(* Get database connection from pool or create new one *)
 let get_db_connection () =
-  match !db_handle with
-  | Some db -> Ok db
+  match !connection_pool with
   | None ->
-      try
+      (* Fallback to single connection *)
+      (try
         let db = Sqlite3.db_open !db_path in
-        db_handle := Some db;
         Ok db
       with Sqlite3.Error msg ->
-        Error (ConnectionError msg)
+        Error (ConnectionError msg))
+  | Some pool ->
+      (match pool.available with
+      | db :: rest ->
+          pool.available <- rest;
+          Ok db
+      | [] when !(pool.current_size) < pool.max_size ->
+          (try
+            let db = Sqlite3.db_open !db_path in
+            pool.connections <- db :: pool.connections;
+            incr pool.current_size;
+            Ok db
+          with Sqlite3.Error msg ->
+            Error (ConnectionError msg))
+      | [] ->
+          (* Pool exhausted, use first available *)
+          (match pool.connections with
+          | db :: _ -> Ok db
+          | [] -> Error (ConnectionError "No connections available")))
 
-(* Execute SQL with proper error handling *)
+(* Return connection to pool *)
+let return_connection db =
+  match !connection_pool with
+  | None -> ignore (Sqlite3.db_close db)
+  | Some pool ->
+      if not (List.mem db pool.available) then
+        pool.available <- db :: pool.available
+
+(* Execute SQL with proper error handling and connection management *)
 let execute_sql_safe sql =
   match get_db_connection () with
   | Error err -> Error err
   | Ok db ->
-      try
+      (try
         let rows = ref [] in
         let callback row _headers =
           let row_data = Array.to_list (Array.map (function Some s -> s | None -> "") row) in
           rows := row_data :: !rows
         in
-        match Sqlite3.exec db ~cb:callback sql with
+        let result = match Sqlite3.exec db ~cb:callback sql with
         | Sqlite3.Rc.OK -> Ok (List.rev !rows)
         | rc -> Error (SqliteError (Sqlite3.Rc.to_string rc))
+        in
+        return_connection db;
+        result
       with Sqlite3.Error msg ->
-        Error (SqliteError msg)
+        return_connection db;
+        Error (SqliteError msg))
 
 (* Execute SQL without result data (INSERT, UPDATE, DELETE) *)
 let execute_sql_no_result sql =
   match get_db_connection () with
   | Error err -> Error err
   | Ok db ->
-      try
-        match Sqlite3.exec db sql with
+      (try
+        let result = match Sqlite3.exec db sql with
         | Sqlite3.Rc.OK -> Ok ()
         | rc -> Error (SqliteError (Sqlite3.Rc.to_string rc))
+        in
+        return_connection db;
+        result
       with Sqlite3.Error msg ->
-        Error (SqliteError msg)
+        return_connection db;
+        Error (SqliteError msg))
 
-(* High-performance prepared statement batch insertion *)
+(* Ultra high-performance prepared statement batch insertion with caching *)
 let batch_insert_with_prepared_statement table_sql values_list =
   match get_db_connection () with
   | Error err -> Error err
   | Ok db ->
-      try
-        (* Prepare the statement once *)
-        let stmt = Sqlite3.prepare db table_sql in
+      (try
+        (* Use cached prepared statement for maximum performance *)
+        let stmt = PreparedStmtCache.get_or_prepare db table_sql in
         let total_inserted = ref 0 in
         
-        (* Begin transaction for batch *)
-        (match Sqlite3.exec db "BEGIN TRANSACTION" with
+        (* Begin immediate transaction to prevent deadlocks *)
+        (match Sqlite3.exec db "BEGIN IMMEDIATE" with
          | Sqlite3.Rc.OK -> ()
          | rc -> failwith ("Transaction begin failed: " ^ Sqlite3.Rc.to_string rc));
         
-        (* Execute for each set of values *)
+        (* Batch execute with optimized binding *)
         List.iter (fun values ->
-          (* Reset and bind parameters *)
+          (* Reset statement *)
           ignore (Sqlite3.reset stmt);
+          
+          (* Bind all parameters efficiently *)
           Array.iteri (fun i value ->
             match Sqlite3.bind stmt (i + 1) (Sqlite3.Data.TEXT value) with
             | Sqlite3.Rc.OK -> ()
@@ -92,19 +168,24 @@ let batch_insert_with_prepared_statement table_sql values_list =
         ) values_list;
         
         (* Commit transaction *)
-        (match Sqlite3.exec db "COMMIT" with
+        let result = (match Sqlite3.exec db "COMMIT" with
          | Sqlite3.Rc.OK -> Ok !total_inserted
          | rc -> 
              let _ = Sqlite3.exec db "ROLLBACK" in
              Error (SqliteError ("Commit failed: " ^ Sqlite3.Rc.to_string rc)))
+        in
+        return_connection db;
+        result
         
       with 
       | Sqlite3.Error msg -> 
           let _ = Sqlite3.exec db "ROLLBACK" in
+          return_connection db;
           Error (SqliteError msg)
       | Failure msg ->
           let _ = Sqlite3.exec db "ROLLBACK" in
-          Error (SqliteError msg)
+          return_connection db;
+          Error (SqliteError msg))
 
 (* Parse contact data from SQLite row *)
 let parse_contact_row = function
@@ -207,6 +288,33 @@ let clear_pre_scheduled_emails () =
   | Ok () -> Ok 1  (* Success indicator *)
   | Error err -> Error err
 
+(* Enhanced SQLite PRAGMA settings for ultra performance *)
+let optimize_sqlite_for_ultra_performance () =
+  let optimizations = [
+    "PRAGMA synchronous = OFF";           (* Maximum speed, some durability risk *)
+    "PRAGMA journal_mode = MEMORY";       (* Memory journaling for speed *)
+    "PRAGMA cache_size = 100000";         (* 400MB+ cache for large operations *)
+    "PRAGMA page_size = 16384";           (* Larger pages for bulk operations *)
+    "PRAGMA temp_store = MEMORY";         (* All temp data in memory *)
+    "PRAGMA count_changes = OFF";         (* No change counting *)
+    "PRAGMA auto_vacuum = 0";             (* No auto-vacuum during bulk ops *)
+    "PRAGMA secure_delete = OFF";         (* Faster deletes *)
+    "PRAGMA locking_mode = EXCLUSIVE";    (* Exclusive locking *)
+    "PRAGMA mmap_size = 268435456";       (* 256MB memory mapping *)
+    "PRAGMA threads = 4";                 (* Multi-threading support *)
+    "PRAGMA optimize";                    (* Optimize query planner *)
+  ] in
+  
+  let rec apply_pragmas remaining =
+    match remaining with
+    | [] -> Ok ()
+    | pragma :: rest ->
+        match execute_sql_no_result pragma with
+        | Ok () -> apply_pragmas rest
+        | Error err -> Error err
+  in
+  apply_pragmas optimizations
+
 (* Apply high-performance SQLite PRAGMA settings *)
 let optimize_sqlite_for_bulk_inserts () =
   let optimizations = [
@@ -230,6 +338,101 @@ let optimize_sqlite_for_bulk_inserts () =
         | Error err -> Error err
   in
   apply_pragmas optimizations
+
+(* Database warmup for better performance *)
+let warmup_database () =
+  let warmup_queries = [
+    "SELECT COUNT(*) FROM contacts";
+    "SELECT COUNT(*) FROM email_schedules";
+    "SELECT sqlite_version()";
+  ] in
+  
+  let rec run_warmup remaining =
+    match remaining with
+    | [] -> Ok ()
+    | query :: rest ->
+        match execute_sql_safe query with
+        | Ok _ -> run_warmup rest
+        | Error err -> Error err
+  in
+  run_warmup warmup_queries
+
+(* Analyze database statistics for optimization *)
+let analyze_database_performance () =
+  let analysis_queries = [
+    ("table_info", "SELECT name, sql FROM sqlite_master WHERE type='table'");
+    ("index_info", "SELECT name, sql FROM sqlite_master WHERE type='index'");
+    ("cache_stats", "PRAGMA cache_size");
+    ("page_size", "PRAGMA page_size");
+    ("journal_mode", "PRAGMA journal_mode");
+  ] in
+  
+  let rec collect_stats remaining acc =
+    match remaining with
+    | [] -> Ok acc
+    | (label, query) :: rest ->
+        match execute_sql_safe query with
+        | Ok result -> 
+            let stats = (label, result) in
+            collect_stats rest (stats :: acc)
+        | Error err -> Error err
+  in
+  collect_stats analysis_queries []
+
+(* Enhanced indexes for maximum performance *)
+let ensure_performance_indexes () =
+  let indexes = [
+    (* Core contact indexes *)
+    "CREATE INDEX IF NOT EXISTS idx_contacts_state_birthday ON contacts(state, birth_date)";
+    "CREATE INDEX IF NOT EXISTS idx_contacts_state_effective ON contacts(state, effective_date)";
+    "CREATE INDEX IF NOT EXISTS idx_contacts_email_zip ON contacts(email, zip_code)";
+    "CREATE INDEX IF NOT EXISTS idx_contacts_state_only ON contacts(state)";
+    
+    (* Email schedule indexes *)
+    "CREATE INDEX IF NOT EXISTS idx_schedules_lookup ON email_schedules(contact_id, email_type, scheduled_send_date)";
+    "CREATE INDEX IF NOT EXISTS idx_schedules_status_date ON email_schedules(status, scheduled_send_date)";
+    "CREATE INDEX IF NOT EXISTS idx_schedules_run_id ON email_schedules(scheduler_run_id)";
+    "CREATE INDEX IF NOT EXISTS idx_schedules_send_date ON email_schedules(scheduled_send_date)";
+    "CREATE INDEX IF NOT EXISTS idx_schedules_contact_status ON email_schedules(contact_id, status)";
+    
+    (* Performance indexes for complex queries *)
+    "CREATE INDEX IF NOT EXISTS idx_contacts_valid_scheduling ON contacts(email, zip_code, state) WHERE email IS NOT NULL AND zip_code IS NOT NULL";
+    "CREATE INDEX IF NOT EXISTS idx_schedules_prestatus ON email_schedules(status, scheduled_send_date) WHERE status IN ('pre-scheduled', 'scheduled')";
+  ] in
+  
+  let rec create_indexes remaining =
+    match remaining with
+    | [] -> Ok ()
+    | index_sql :: rest ->
+        match execute_sql_no_result index_sql with
+        | Ok () -> create_indexes rest
+        | Error err -> Error err
+  in
+  create_indexes indexes
+
+(* Initialize database with full optimization *)
+let initialize_database () =
+  match init_connection_pool 4 with
+  | Error err -> Error err
+  | Ok () ->
+      match optimize_sqlite_for_bulk_inserts () with
+      | Error err -> Error err
+      | Ok () ->
+          match ensure_performance_indexes () with
+          | Error err -> Error err
+          | Ok () ->
+              match warmup_database () with
+              | Error err -> Error err
+              | Ok () -> Ok ()
+
+(* Clean shutdown *)
+let close_database () =
+  match !connection_pool with
+  | None -> ()
+  | Some pool ->
+      PreparedStmtCache.clear ();
+      List.iter (fun db -> ignore (Sqlite3.db_close db)) pool.connections;
+      connection_pool := None 
 
 (* Restore safe SQLite settings after bulk operations *)
 let restore_sqlite_safety () =
@@ -371,37 +574,4 @@ let get_contact_interactions contact_id since_date =
              Ok (has_clicks, has_health_answers)
            with _ -> Error (ParseError "Invalid interaction count"))
        | Ok _ -> Error (ParseError "Invalid event result"))
-  | Ok _ -> Error (ParseError "Invalid click result")
-
-(* Create performance indexes *)
-let ensure_performance_indexes () =
-  let indexes = [
-    "CREATE INDEX IF NOT EXISTS idx_contacts_state_birthday ON contacts(state, birth_date)";
-    "CREATE INDEX IF NOT EXISTS idx_contacts_state_effective ON contacts(state, effective_date)";
-    "CREATE INDEX IF NOT EXISTS idx_schedules_lookup ON email_schedules(contact_id, email_type, scheduled_send_date)";
-    "CREATE INDEX IF NOT EXISTS idx_schedules_status_date ON email_schedules(status, scheduled_send_date)";
-  ] in
-  
-  let rec create_indexes remaining =
-    match remaining with
-    | [] -> Ok ()
-    | index_sql :: rest ->
-        match execute_sql_no_result index_sql with
-        | Ok () -> create_indexes rest
-        | Error err -> Error err
-  in
-  create_indexes indexes
-
-(* Initialize database and ensure schema *)
-let initialize_database () =
-  match ensure_performance_indexes () with
-  | Ok () -> Ok ()
-  | Error err -> Error err
-
-(* Close database connection *)
-let close_database () =
-  match !db_handle with
-  | None -> ()
-  | Some db ->
-      ignore (Sqlite3.db_close db);
-      db_handle := None 
+  | Ok _ -> Error (ParseError "Invalid click result") 
