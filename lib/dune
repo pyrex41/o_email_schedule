@@ -1,5 +1,15 @@
 (include_subdirs unqualified)
 
+; Rule to build the Rust FFI library
+(rule
+ (targets libturso_ocaml_ffi.a dllturso_ocaml_ffi.so)
+ (deps (universe))
+ (action
+  (progn
+   (run cargo build --release --lib)
+   (copy target/release/libturso_ocaml_ffi.a libturso_ocaml_ffi.a)
+   (copy target/release/libturso_ocaml_ffi.so dllturso_ocaml_ffi.so))))
+
 (library
  (name scheduler)
  (public_name scheduler)
@@ -7,4 +17,7 @@
   str
   unix
   sqlite3
-  lwt))
+  lwt)
+ ; Link against the Rust FFI library
+ (foreign_archives turso_ocaml_ffi)
+ (c_library_flags (-lpthread -ldl -lm)))
