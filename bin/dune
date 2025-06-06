@@ -17,3 +17,8 @@
  (public_name debug_validation)
  (name debug_validation)
  (libraries scheduler))
+
+(executable
+ (public_name db_scheduler)
+ (name db_scheduler)
+ (libraries scheduler))

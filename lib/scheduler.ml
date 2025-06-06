@@ -9,3 +9,7 @@ module Config = Config
 module Load_balancer = Load_balancer
 module Email_scheduler = Email_scheduler
 module Audit = Audit_simple
+
+module Db = struct
+  module Simple_db = Simple_db
+end

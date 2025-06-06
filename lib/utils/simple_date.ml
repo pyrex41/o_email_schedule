@@ -120,3 +120,12 @@ let string_of_date d = Printf.sprintf "%04d-%02d-%02d" d.year d.month d.day
 let string_of_time t = Printf.sprintf "%02d:%02d:%02d" t.hour t.minute t.second
 let string_of_datetime dt = 
   Printf.sprintf "%s %s" (string_of_date dt.date) (string_of_time dt.time)
+
+let parse_date date_str =
+  match String.split_on_char '-' date_str with
+  | [year_str; month_str; day_str] ->
+      let year = int_of_string year_str in
+      let month = int_of_string month_str in
+      let day = int_of_string day_str in
+      { year; month; day }
+  | _ -> failwith ("Invalid date format: " ^ date_str)
