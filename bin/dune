@@ -67,3 +67,8 @@
  (public_name hybrid_performance_test)
  (name hybrid_performance_test)
  (libraries scheduler unix threads))
+
+(executable
+ (public_name native_performance_test)
+ (name native_performance_test)
+ (libraries scheduler unix))

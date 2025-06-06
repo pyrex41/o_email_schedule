@@ -1,0 +1,16 @@
+failed: Operation timed out.
+Connecting to opam.ocaml.org (opam.ocaml.org)|151.115.76.159|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 328819 (321K)
+Saving to: ‘/Users/reuben/.opam/download-cache/sha256/27/27ddeb2f60fbae50dc504e63e63cd5f012689084a76d5fdd4d1371d5341ff8db.tmp.part’
+
+     0K .......... .......... .......... .......... .......... 15%  133K 2s
+    50K .......... .......... .......... .......... .......... 31%  285K 1s
+   100K .......... .......... .......... .......... .......... 46%  555K 1s
+   150K .......... .......... .......... .......... .......... 62%  627K 0s
+   200K .......... .......... .......... .......... .......... 77%  899K 0s
+   250K .......... .......... .......... .......... .......... 93%  613K 0s
+   300K .......... .......... .                               100% 1.24M=0.9s
+
+2025-06-05 23:52:40 (367 KB/s) - ‘/Users/reuben/.opam/download-cache/sha256/27/27ddeb2f60fbae50dc504e63e63cd5f012689084a76d5fdd4d1371d5341ff8db.tmp.part’ saved [328819/328819]
+
