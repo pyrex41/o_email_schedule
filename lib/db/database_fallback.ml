@@ -41,23 +41,36 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
   let lookback_window_start = add_days today (-lookback_days) in
   
   (* Format dates for SQL pattern matching *)
-  let _today_str = Printf.sprintf "%02d-%02d" today.month today.day in
-  let future_end_str = Printf.sprintf "%02d-%02d" active_window_end.month active_window_end.day in
-  let past_start_str = Printf.sprintf "%02d-%02d" lookback_window_start.month lookback_window_start.day in
+  let start_str = Printf.sprintf "%02d-%02d" lookback_window_start.month lookback_window_start.day in
+  let end_str = Printf.sprintf "%02d-%02d" active_window_end.month active_window_end.day in
   
-  (* Optimized query that pre-filters contacts with anniversaries in the window *)
-  let query = Printf.sprintf {|
-    SELECT id, email, zip_code, state, birth_date, effective_date
-    FROM contacts
-    WHERE email IS NOT NULL AND email != '' 
-    AND zip_code IS NOT NULL AND zip_code != ''
-    AND (
-      (strftime('%%m-%%d', birth_date) BETWEEN '%s' AND '12-31') OR
-      (strftime('%%m-%%d', birth_date) BETWEEN '01-01' AND '%s') OR
-      (strftime('%%m-%%d', effective_date) BETWEEN '%s' AND '12-31') OR
-      (strftime('%%m-%%d', effective_date) BETWEEN '01-01' AND '%s')
-    )
-  |} past_start_str future_end_str past_start_str future_end_str in
+  (* Fixed query that properly handles date ranges within the same year *)
+  let query = 
+    if lookback_window_start.month <= active_window_end.month then
+      (* Window doesn't cross year boundary - simple case *)
+      Printf.sprintf {|
+        SELECT id, email, zip_code, state, birth_date, effective_date
+        FROM contacts
+        WHERE email IS NOT NULL AND email != '' 
+        AND zip_code IS NOT NULL AND zip_code != ''
+        AND (
+          (strftime('%%m-%%d', birth_date) BETWEEN '%s' AND '%s') OR
+          (strftime('%%m-%%d', effective_date) BETWEEN '%s' AND '%s')
+        )
+      |} start_str end_str start_str end_str
+    else
+      (* Window crosses year boundary - need to handle two ranges *)
+      Printf.sprintf {|
+        SELECT id, email, zip_code, state, birth_date, effective_date
+        FROM contacts
+        WHERE email IS NOT NULL AND email != '' 
+        AND zip_code IS NOT NULL AND zip_code != ''
+        AND (
+          (strftime('%%m-%%d', birth_date) >= '%s' OR strftime('%%m-%%d', birth_date) <= '%s') OR
+          (strftime('%%m-%%d', effective_date) >= '%s' OR strftime('%%m-%%d', effective_date) <= '%s')
+        )
+      |} start_str end_str start_str end_str
+  in
   
   match execute_sql_safe query with
   | Error err -> Error err
@@ -148,7 +161,256 @@ let clear_pre_scheduled_emails () =
   | Ok _ -> Ok 1  (* Success indicator *)
   | Error err -> Error err
 
-(* Batch insert with improved transaction handling *)
+(* Apply high-performance SQLite PRAGMA settings *)
+let optimize_sqlite_for_bulk_inserts () =
+  let optimizations = [
+    "PRAGMA synchronous = OFF";           (* Don't wait for OS write confirmation - major speedup *)
+    "PRAGMA journal_mode = WAL";          (* WAL mode - test for real workload performance *)
+    "PRAGMA cache_size = 50000";          (* Much larger cache - 200MB+ *)
+    "PRAGMA page_size = 8192";            (* Larger page size for bulk operations *)
+    "PRAGMA temp_store = MEMORY";         (* Store temporary tables in memory *)
+    "PRAGMA count_changes = OFF";         (* Don't count changes - slight speedup *)
+    "PRAGMA auto_vacuum = 0";             (* Disable auto-vacuum during bulk inserts *)
+    "PRAGMA secure_delete = OFF";         (* Don't securely delete - faster *)
+    "PRAGMA locking_mode = EXCLUSIVE";    (* Exclusive access for bulk operations *)
+  ] in
+  
+  let rec apply_pragmas remaining =
+    match remaining with
+    | [] -> Ok ()
+    | pragma :: rest ->
+        match execute_sql_safe pragma with
+        | Ok _ -> apply_pragmas rest
+        | Error err -> Error err
+  in
+  apply_pragmas optimizations
+
+(* Restore safe SQLite settings after bulk operations *)
+let restore_sqlite_safety () =
+  let safety_settings = [
+    "PRAGMA synchronous = NORMAL";        (* Restore safe synchronous mode *)
+    "PRAGMA journal_mode = WAL";          (* Keep WAL mode - it's safe and fast *)
+    "PRAGMA auto_vacuum = 1";             (* Re-enable auto-vacuum *)
+    "PRAGMA secure_delete = ON";          (* Re-enable secure delete *)
+    "PRAGMA locking_mode = NORMAL";       (* Restore normal locking *)
+  ] in
+  
+  let rec apply_pragmas remaining =
+    match remaining with
+    | [] -> Ok ()
+    | pragma :: rest ->
+        match execute_sql_safe pragma with
+        | Ok _ -> apply_pragmas rest
+        | Error err -> Error err
+  in
+  apply_pragmas safety_settings
+
+(* Ultra high-performance batched insert using multi-VALUES *)
+let batch_insert_schedules_ultra_optimized schedules =
+  if schedules = [] then Ok 0 else
+  
+  (* Apply performance optimizations *)
+  match optimize_sqlite_for_bulk_inserts () with
+  | Error err -> Error err
+  | Ok _ ->
+      (* Use massive batches with multi-VALUES approach *)
+      let rows_per_batch = 90 in  (* Safe large batch size *)
+      
+      let rec chunk_list lst size =
+        match lst with
+        | [] -> []
+        | _ ->
+            let rec take n acc = function
+              | [] -> (List.rev acc, [])
+              | x :: xs when n > 0 -> take (n-1) (x::acc) xs
+              | xs -> (List.rev acc, xs)
+            in
+            let (chunk, rest) = take size [] lst in
+            chunk :: chunk_list rest size
+      in
+      
+      let chunks = chunk_list schedules rows_per_batch in
+      let total_inserted = ref 0 in
+      
+      let process_chunk chunk =
+        if chunk = [] then Ok 0 else
+        
+        (* Build multi-VALUES INSERT statement *)
+        let values_clauses = List.map (fun schedule ->
+          let scheduled_date_str = string_of_date schedule.scheduled_date in
+          let scheduled_time_str = string_of_time schedule.scheduled_time in
+          let status_str = match schedule.status with
+            | PreScheduled -> "pre-scheduled"
+            | Skipped _reason -> "skipped"
+            | _ -> "unknown"
+          in
+          let skip_reason = match schedule.status with 
+            | Skipped reason -> reason 
+            | _ -> ""
+          in
+          
+          let current_year = (current_date()).year in
+          let (event_year, event_month, event_day) = match schedule.email_type with
+            | Anniversary Birthday -> (current_year, 1, 1)
+            | Anniversary EffectiveDate -> (current_year, 1, 2)
+            | Anniversary AEP -> (current_year, 9, 15)
+            | _ -> (current_year, 1, 1)
+          in
+          
+          Printf.sprintf "(%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')"
+            schedule.contact_id
+            (string_of_email_type schedule.email_type)
+            event_year event_month event_day
+            scheduled_date_str
+            scheduled_time_str
+            status_str
+            skip_reason
+            schedule.scheduler_run_id
+        ) chunk in
+        
+        (* Single INSERT with multiple VALUES - maximum SQLite performance *)
+        let batch_sql = Printf.sprintf {|
+          INSERT OR REPLACE INTO email_schedules (
+            contact_id, email_type, event_year, event_month, event_day,
+            scheduled_send_date, scheduled_send_time, status, skip_reason,
+            batch_id
+          ) VALUES %s
+        |} (String.concat ", " values_clauses) in
+        
+        match execute_sql_safe batch_sql with
+        | Ok _ -> Ok (List.length chunk)
+        | Error err -> Error err
+      in
+      
+      (* Process chunks individually with their own transactions *)
+      let rec process_chunks remaining_chunks =
+        match remaining_chunks with
+        | [] -> Ok !total_inserted
+        | chunk :: rest ->
+            (* Each chunk gets its own transaction for reliability *)
+            match execute_sql_safe "BEGIN TRANSACTION" with
+            | Error err -> Error err
+            | Ok _ ->
+                (match process_chunk chunk with
+                | Ok count -> 
+                    (match execute_sql_safe "COMMIT" with
+                    | Ok _ ->
+                        total_inserted := !total_inserted + count;
+                        process_chunks rest
+                    | Error err -> Error err)
+                | Error err -> 
+                    let _ = execute_sql_safe "ROLLBACK" in
+                    Error err)
+      in
+      
+      match process_chunks chunks with
+      | Ok total ->
+          (* Restore safety settings *)
+          let _ = restore_sqlite_safety () in
+          Ok total
+      | Error err -> 
+          let _ = restore_sqlite_safety () in
+          Error err
+
+(* Simple but highly effective batch insert using large multi-VALUES statements *)
+let batch_insert_schedules_optimized schedules =
+  if schedules = [] then Ok 0 else
+  
+  (* Apply performance optimizations *)
+  match optimize_sqlite_for_bulk_inserts () with
+  | Error err -> Error err
+  | Ok _ ->
+      (* Use large chunks with single multi-VALUES statements *)
+      let chunk_size = 800 in  (* Large but safe for multi-VALUES *)
+      
+      let rec chunk_list lst size =
+        match lst with
+        | [] -> []
+        | _ ->
+            let rec take n acc = function
+              | [] -> (List.rev acc, [])
+              | x :: xs when n > 0 -> take (n-1) (x::acc) xs
+              | xs -> (List.rev acc, xs)
+            in
+            let (chunk, rest) = take size [] lst in
+            chunk :: chunk_list rest size
+      in
+      
+      let chunks = chunk_list schedules chunk_size in
+      let total_inserted = ref 0 in
+      
+      let process_chunk chunk =
+        if chunk = [] then Ok 0 else
+        
+        (* Build multi-VALUES INSERT statement *)
+        let values_clauses = List.map (fun schedule ->
+          let scheduled_date_str = string_of_date schedule.scheduled_date in
+          let scheduled_time_str = string_of_time schedule.scheduled_time in
+          let status_str = match schedule.status with
+            | PreScheduled -> "pre-scheduled"
+            | Skipped _reason -> "skipped"
+            | _ -> "unknown"
+          in
+          let skip_reason = match schedule.status with 
+            | Skipped reason -> reason 
+            | _ -> ""
+          in
+          
+          let current_year = (current_date()).year in
+          let (event_year, event_month, event_day) = match schedule.email_type with
+            | Anniversary Birthday -> (current_year, 1, 1)
+            | Anniversary EffectiveDate -> (current_year, 1, 2)
+            | Anniversary AEP -> (current_year, 9, 15)
+            | _ -> (current_year, 1, 1)
+          in
+          
+          Printf.sprintf "(%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')"
+            schedule.contact_id
+            (string_of_email_type schedule.email_type)
+            event_year event_month event_day
+            scheduled_date_str
+            scheduled_time_str
+            status_str
+            skip_reason
+            schedule.scheduler_run_id
+        ) chunk in
+        
+        (* Single INSERT with multiple VALUES - maximum SQLite performance *)
+        let batch_sql = Printf.sprintf {|
+          INSERT OR REPLACE INTO email_schedules (
+            contact_id, email_type, event_year, event_month, event_day,
+            scheduled_send_date, scheduled_send_time, status, skip_reason,
+            batch_id
+          ) VALUES %s
+        |} (String.concat ", " values_clauses) in
+        
+        match execute_sql_safe batch_sql with
+        | Ok _ -> Ok (List.length chunk)
+        | Error err -> Error err
+      in
+      
+      (* Process chunks sequentially *)
+      let rec process_chunks remaining_chunks =
+        match remaining_chunks with
+        | [] -> Ok !total_inserted
+        | chunk :: rest ->
+            match process_chunk chunk with
+            | Ok count -> 
+                total_inserted := !total_inserted + count;
+                process_chunks rest
+            | Error err -> Error err
+      in
+      
+      match process_chunks chunks with
+      | Ok total ->
+          (* Restore safety settings *)
+          let _ = restore_sqlite_safety () in
+          Ok total
+      | Error err -> 
+          let _ = restore_sqlite_safety () in
+          Error err
+
+(* Batch insert with improved transaction handling - for smaller datasets *)
 let batch_insert_schedules_transactional schedules =
   if schedules = [] then Ok 0 else
   
@@ -202,41 +464,46 @@ let batch_insert_schedules_transactional schedules =
   | Ok _ -> Ok (List.length schedules)
   | Error err -> Error err
 
-(* Chunked batch insert to handle large datasets *)
+(* Chunked batch insert with automatic chunk size optimization *)
 let batch_insert_schedules_chunked schedules chunk_size =
-  if schedules = [] then Ok 0 else
-  
-  let rec chunk_list lst size =
-    match lst with
-    | [] -> []
-    | _ ->
-        let (chunk, rest) = 
-          let rec take n lst acc =
-            match lst, n with
-            | [], _ -> (List.rev acc, [])
-            | _, 0 -> (List.rev acc, lst)
-            | x :: xs, n -> take (n-1) xs (x :: acc)
+  (* For large datasets, use the optimized approach with larger batches *)
+  if List.length schedules > 1000 then
+    batch_insert_schedules_optimized schedules
+  else
+    (* For smaller datasets, use the simpler approach *)
+    if schedules = [] then Ok 0 else
+    
+    let rec chunk_list lst size =
+      match lst with
+      | [] -> []
+      | _ ->
+          let (chunk, rest) = 
+            let rec take n lst acc =
+              match lst, n with
+              | [], _ -> (List.rev acc, [])
+              | _, 0 -> (List.rev acc, lst)
+              | x :: xs, n -> take (n-1) xs (x :: acc)
+            in
+            take size lst []
           in
-          take size lst []
-        in
-        chunk :: chunk_list rest size
-  in
-  
-  let chunks = chunk_list schedules chunk_size in
-  let total_inserted = ref 0 in
-  
-  let rec process_chunks remaining_chunks =
-    match remaining_chunks with
-    | [] -> Ok !total_inserted
-    | chunk :: rest ->
-        match batch_insert_schedules_transactional chunk with
-        | Ok count -> 
-            total_inserted := !total_inserted + count;
-            process_chunks rest
-        | Error err -> Error err
-  in
-  
-  process_chunks chunks
+          chunk :: chunk_list rest size
+    in
+    
+    let chunks = chunk_list schedules chunk_size in
+    let total_inserted = ref 0 in
+    
+    let rec process_chunks remaining_chunks =
+      match remaining_chunks with
+      | [] -> Ok !total_inserted
+      | chunk :: rest ->
+          match batch_insert_schedules_transactional chunk with
+          | Ok count -> 
+              total_inserted := !total_inserted + count;
+              process_chunks rest
+          | Error err -> Error err
+    in
+    
+    process_chunks chunks
 
 (* Get sent emails for followup logic with proper filtering *)
 let get_sent_emails_for_followup lookback_days =

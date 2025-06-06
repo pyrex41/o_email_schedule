@@ -1,0 +1,76 @@
+OCaml Email Scheduler Performance Test Results
+==============================================
+Timestamp: Thu Jun  5 22:36:32 CDT 2025
+System: Darwin negroni.local 23.2.0 Darwin Kernel Version 23.2.0: Wed Nov 15 21:53:18 PST 2023; root:xnu-10002.61.3~2/RELEASE_ARM64_T6000 arm64
+
+🚀 OCaml Email Scheduler Performance Test Suite
+==============================================
+
+=== Small Dataset (org-206) ===
+Loaded 14 ZIP codes (simplified)
+📊 Loading contacts...
+   Loaded 634 contacts in 0.000 seconds
+   Throughput: inf contacts/second
+⚡ Generating schedules...
+   Generated 1322 schedules in 0.000 seconds
+   Throughput: inf schedules/second
+   Memory used: 1071740 words (8.2 MB)
+⚖️  Load balancing...
+   Load balancing completed in 0.000 seconds
+💾 Inserting schedules...
+   Inserted 1322 schedules in 0.000 seconds
+   Throughput: inf inserts/second
+
+📈 Performance Summary:
+   • Total time: 0.000 seconds
+   • Contacts processed: 634
+   • Schedules generated: 1322
+   • Schedules inserted: 1322
+   • Overall throughput: inf contacts/second
+   • Memory efficiency: 13.2 KB per contact
+
+=== Golden Dataset (~25k contacts) ===
+📊 Loading contacts...
+   Loaded 24613 contacts in 0.000 seconds
+   Throughput: inf contacts/second
+⚡ Generating schedules...
+   Generated 48218 schedules in 0.000 seconds
+   Throughput: inf schedules/second
+   Memory used: 42235606 words (322.2 MB)
+⚖️  Load balancing...
+   Load balancing completed in 0.000 seconds
+💾 Inserting schedules...
+   Inserted 48218 schedules in 12.000 seconds
+   Throughput: 4018 inserts/second
+
+📈 Performance Summary:
+   • Total time: 12.000 seconds
+   • Contacts processed: 24613
+   • Schedules generated: 48218
+   • Schedules inserted: 48218
+   • Overall throughput: 2051 contacts/second
+   • Memory efficiency: 13.4 KB per contact
+
+=== Large Generated Dataset ===
+📊 Loading contacts...
+   Loaded 25000 contacts in 0.000 seconds
+   Throughput: inf contacts/second
+⚡ Generating schedules...
+   Generated 51399 schedules in 0.000 seconds
+   Throughput: inf schedules/second
+   Memory used: 42144372 words (321.5 MB)
+⚖️  Load balancing...
+   Load balancing completed in 0.000 seconds
+💾 Inserting schedules...
+❌ Database insertion failed: SQLite error: Command failed
+
+
+🏆 PERFORMANCE COMPARISON REPORT
+=================================
+Dataset              | Contacts   | Time (s)   | Schedules    | Inserts      | Throughput (c/s)
+-----------------------------------------------------------------------------------------------
+Small Dataset        | 634        | 0.000      | 1322         | 1322         | 0              
+Golden Dataset       | 24613      | 12.000     | 48218        | 48218        | 2051           
+Large Generated      | 25000      | 0.000      | 51399        | 0            | 0              
+
+✅ Performance testing complete!
