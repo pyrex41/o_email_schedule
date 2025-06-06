@@ -1,0 +1,11 @@
+BEGIN TRANSACTION;
+CREATE INDEX idx_contacts_state_birthday ON contacts(state, birth_date);
+CREATE INDEX idx_contacts_state_effective ON contacts(state, effective_date);
+DELETE FROM email_schedules WHERE id=60230;
+DELETE FROM email_schedules WHERE id=60231;
+DELETE FROM email_schedules WHERE id=60232;
+DELETE FROM email_schedules WHERE id=60233;
+DELETE FROM email_schedules WHERE id=60234;
+DELETE FROM email_schedules WHERE id=60235;
+DELETE FROM email_schedules WHERE id=60236;
+COMMIT;

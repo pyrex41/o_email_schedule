@@ -12,6 +12,4 @@ module Audit = Audit_simple
 
 module Db = struct
   module Database = Database_native (* Use native SQLite for maximum performance *)
-  module Database_fallback = Database_fallback (* Keep fallback for compatibility *)
-  module Simple_db = Simple_db (* Keep old one for compatibility *)
 end

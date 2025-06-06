@@ -6,4 +6,5 @@
  (libraries
   str
   unix
-  sqlite3))
+  sqlite3
+  lwt))

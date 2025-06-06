@@ -1,11 +1,11 @@
 open Scheduler.Email_scheduler
 open Scheduler.Db.Database
 
-(* Performance measurement utilities *)
+(* Performance measurement utilities with high precision *)
 let time_it f =
-  let start_time = Unix.time () in
+  let start_time = Unix.gettimeofday () in
   let result = f () in
-  let end_time = Unix.time () in
+  let end_time = Unix.gettimeofday () in
   (result, end_time -. start_time)
 
 let measure_memory_usage () =

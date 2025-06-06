@@ -4,26 +4,6 @@
  (libraries scheduler))
 
 (executable
- (public_name demo_simple)
- (name demo_simple)
- (libraries scheduler))
-
-(executable
- (public_name test_zip)
- (name test_zip)
- (libraries scheduler))
-
-(executable
- (public_name debug_validation)
- (name debug_validation)
- (libraries scheduler))
-
-(executable
- (public_name db_scheduler)
- (name db_scheduler)
- (libraries scheduler))
-
-(executable
  (public_name high_performance_scheduler)
  (name high_performance_scheduler)
  (libraries scheduler))
@@ -43,25 +23,11 @@
  (name performance_tests_parallel)
  (libraries scheduler))
 
-(executable
- (public_name pure_sqlite_benchmark)
- (name pure_sqlite_benchmark)
- (libraries scheduler))
-
-(executable
- (public_name simple_insert_test)
- (name simple_insert_test)
- (libraries scheduler))
 
 (executable
  (public_name pragma_performance_test)
  (name pragma_performance_test)
  (libraries scheduler))
-
-(executable
- (public_name threaded_performance_test)
- (name threaded_performance_test)
- (libraries scheduler unix threads))
 
 (executable
  (public_name hybrid_performance_test)
@@ -72,3 +38,8 @@
  (public_name native_performance_test)
  (name native_performance_test)
  (libraries scheduler unix))
+
+(executable
+ (public_name scheduler_cli)
+ (name scheduler_cli)
+ (libraries scheduler))

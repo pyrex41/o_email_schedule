@@ -30,10 +30,19 @@ medicare_email_schedule.install
 *.db-shm
 *.db-wal
 
+# Turso sync files
+local_replica.db
+working_copy.db
+diff.sql
+
 # Large SQLite test datasets (but keep org-206.sqlite3)
 golden_dataset.sqlite3*
 massive_test_dataset.sqlite3*
 large_test_dataset.sqlite3*
+
+# Rust build artifacts
+target/
+Cargo.lock
 
 # Configuration
 .env

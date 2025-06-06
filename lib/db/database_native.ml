@@ -207,12 +207,222 @@ let clear_pre_scheduled_emails () =
   | Ok () -> Ok 1  (* Success indicator *)
   | Error err -> Error err
 
+(* Helper type for existing schedule comparison *)
+type existing_schedule_record = {
+  contact_id: int;
+  email_type: string;
+  scheduled_date: string;
+  scheduled_time: string;
+  status: string;
+  skip_reason: string;
+  scheduler_run_id: string;
+  created_at: string;
+}
+
+(* Get existing schedules for comparison *)
+let get_existing_schedules_for_comparison () =
+  let query = {|
+    SELECT contact_id, email_type, scheduled_send_date, scheduled_send_time, 
+           status, skip_reason, batch_id, created_at
+    FROM email_schedules 
+    WHERE status IN ('pre-scheduled', 'scheduled', 'skipped')
+    ORDER BY contact_id, email_type
+  |} in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let existing_schedules = List.filter_map (fun row ->
+        match row with
+        | [contact_id_str; email_type; scheduled_date; scheduled_time; status; skip_reason_val; batch_id; created_at] ->
+            (try
+              Some ({
+                contact_id = int_of_string contact_id_str;
+                email_type = email_type;
+                scheduled_date = scheduled_date;
+                scheduled_time = scheduled_time;
+                status = status;
+                skip_reason = skip_reason_val;
+                scheduler_run_id = batch_id;
+                created_at = created_at;
+              } : existing_schedule_record)
+            with _ -> None)
+        | _ -> None
+      ) rows in
+      Ok existing_schedules
+
+(* Check if schedule content actually changed (ignoring metadata) *)
+let schedule_content_changed existing_record (new_schedule : email_schedule) =
+  let new_scheduled_date_str = string_of_date new_schedule.scheduled_date in
+  let new_scheduled_time_str = string_of_time new_schedule.scheduled_time in
+  let new_status_str = match new_schedule.status with
+    | PreScheduled -> "pre-scheduled"
+    | Skipped _reason -> "skipped"
+    | _ -> "unknown"
+  in
+  let new_skip_reason = match new_schedule.status with 
+    | Skipped reason -> reason 
+    | _ -> ""
+  in
+  let new_email_type_str = string_of_email_type new_schedule.email_type in
+  
+  (* Compare meaningful fields *)
+  existing_record.email_type <> new_email_type_str ||
+  existing_record.scheduled_date <> new_scheduled_date_str ||
+  existing_record.scheduled_time <> new_scheduled_time_str ||
+  existing_record.status <> new_status_str ||
+  existing_record.skip_reason <> new_skip_reason
+
+(* Find existing schedule for a new schedule *)
+let find_existing_schedule existing_schedules (new_schedule : email_schedule) =
+  let new_email_type_str = string_of_email_type new_schedule.email_type in
+  let new_scheduled_date_str = string_of_date new_schedule.scheduled_date in
+  
+  List.find_opt (fun existing ->
+    existing.contact_id = new_schedule.contact_id &&
+    existing.email_type = new_email_type_str &&
+    existing.scheduled_date = new_scheduled_date_str
+  ) existing_schedules
+
+(* Smart batch insert that preserves scheduler_run_id when content unchanged *)
+let smart_batch_insert_schedules schedules current_run_id =
+  if schedules = [] then Ok 0 else (
+  
+  Printf.printf "🔍 Getting existing schedules for comparison...\n%!";
+  match get_existing_schedules_for_comparison () with
+  | Error err -> Error err
+  | Ok existing_schedules ->
+      Printf.printf "📊 Found %d existing schedules to compare against\n%!" (List.length existing_schedules);
+      
+      match get_db_connection () with
+      | Error err -> Error err
+      | Ok db ->
+          try
+            (* Begin transaction *)
+            (match Sqlite3.exec db "BEGIN TRANSACTION" with
+             | Sqlite3.Rc.OK -> ()
+             | rc -> failwith ("Transaction begin failed: " ^ Sqlite3.Rc.to_string rc));
+            
+            let total_inserted = ref 0 in
+            let unchanged_count = ref 0 in
+            let changed_count = ref 0 in
+            let new_count = ref 0 in
+            
+            (* Process each schedule with smart logic *)
+            List.iter (fun (schedule : email_schedule) ->
+              let scheduled_date_str = string_of_date schedule.scheduled_date in
+              let scheduled_time_str = string_of_time schedule.scheduled_time in
+              let status_str = match schedule.status with
+                | PreScheduled -> "pre-scheduled"
+                | Skipped _reason -> "skipped"
+                | _ -> "unknown"
+              in
+              let skip_reason = match schedule.status with 
+                | Skipped reason -> reason 
+                | _ -> ""
+              in
+              
+              let current_year = (current_date()).year in
+              let (event_year, event_month, event_day) = match schedule.email_type with
+                | Anniversary Birthday -> (current_year, 1, 1)
+                | Anniversary EffectiveDate -> (current_year, 1, 2)
+                | Anniversary AEP -> (current_year, 9, 15)
+                | _ -> (current_year, 1, 1)
+              in
+              
+              (* Determine which scheduler_run_id to use *)
+              let (scheduler_run_id_to_use, _change_type) = 
+                match find_existing_schedule existing_schedules schedule with
+                | None -> 
+                    (* New schedule *)
+                    incr new_count;
+                    (current_run_id, "NEW")
+                | Some existing ->
+                    if schedule_content_changed existing schedule then (
+                      (* Content changed, use new run_id *)
+                      incr changed_count;
+                      (current_run_id, "CHANGED")
+                    ) else (
+                      (* Content unchanged, preserve existing run_id *)
+                      incr unchanged_count;
+                      (existing.scheduler_run_id, "UNCHANGED")
+                    )
+              in
+              
+              let insert_sql = Printf.sprintf {|
+                INSERT OR REPLACE INTO email_schedules (
+                  contact_id, email_type, event_year, event_month, event_day,
+                  scheduled_send_date, scheduled_send_time, status, skip_reason,
+                  batch_id
+                ) VALUES (%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')
+              |} 
+                schedule.contact_id
+                (string_of_email_type schedule.email_type)
+                event_year event_month event_day
+                scheduled_date_str
+                scheduled_time_str
+                status_str
+                skip_reason
+                scheduler_run_id_to_use
+              in
+              
+              match Sqlite3.exec db insert_sql with
+              | Sqlite3.Rc.OK -> incr total_inserted
+              | rc -> failwith ("Insert failed: " ^ Sqlite3.Rc.to_string rc)
+            ) schedules;
+            
+            (* Commit transaction *)
+            (match Sqlite3.exec db "COMMIT" with
+             | Sqlite3.Rc.OK -> 
+                 Printf.printf "✅ Smart update complete: %d total, %d new, %d changed, %d unchanged\n%!" 
+                   !total_inserted !new_count !changed_count !unchanged_count;
+                 Ok !total_inserted
+             | rc -> 
+                 let _ = Sqlite3.exec db "ROLLBACK" in
+                 Error (SqliteError ("Commit failed: " ^ Sqlite3.Rc.to_string rc)))
+            
+          with 
+          | Sqlite3.Error msg -> 
+              let _ = Sqlite3.exec db "ROLLBACK" in
+              Error (SqliteError msg)
+          | Failure msg ->
+              let _ = Sqlite3.exec db "ROLLBACK" in
+              Error (SqliteError msg)
+  )
+
+(* Modified clear function that doesn't delete everything *)
+let smart_clear_outdated_schedules new_schedules =
+  if new_schedules = [] then Ok 0 else
+  
+  (* Build list of (contact_id, email_type, scheduled_date) for schedules we're keeping *)
+  let keeping_schedules = List.map (fun (schedule : email_schedule) ->
+    let email_type_str = string_of_email_type schedule.email_type in
+    let scheduled_date_str = string_of_date schedule.scheduled_date in
+    Printf.sprintf "(%d, '%s', '%s')" 
+      schedule.contact_id email_type_str scheduled_date_str
+  ) new_schedules in
+  
+  let keeping_list = String.concat ", " keeping_schedules in
+  
+  (* Delete only schedules not in our new list *)
+  let delete_query = Printf.sprintf {|
+    DELETE FROM email_schedules 
+    WHERE status IN ('pre-scheduled', 'scheduled', 'skipped')
+    AND (contact_id, email_type, scheduled_send_date) NOT IN (%s)
+  |} keeping_list in
+  
+  match execute_sql_no_result delete_query with
+  | Ok () -> 
+      Printf.printf "🗑️  Cleaned up outdated schedules\n%!";
+      Ok 1
+  | Error err -> Error err
+
 (* Apply high-performance SQLite PRAGMA settings *)
 let optimize_sqlite_for_bulk_inserts () =
   let optimizations = [
     "PRAGMA synchronous = OFF";           (* Don't wait for OS write confirmation - major speedup *)
     "PRAGMA journal_mode = WAL";          (* WAL mode - test for real workload performance *)
-    "PRAGMA cache_size = 50000";          (* Much larger cache - 200MB+ *)
+    "PRAGMA cache_size = 500000";          (* Much larger cache - 200MB+ *)
     "PRAGMA page_size = 8192";            (* Larger page size for bulk operations *)
     "PRAGMA temp_store = MEMORY";         (* Store temporary tables in memory *)
     "PRAGMA count_changes = OFF";         (* Don't count changes - slight speedup *)
@@ -269,7 +479,7 @@ let batch_insert_schedules_native schedules =
       |} in
       
       (* Convert schedules to parameter arrays *)
-      let values_list = List.map (fun schedule ->
+      let values_list = List.map (fun (schedule : email_schedule) ->
         let scheduled_date_str = string_of_date schedule.scheduled_date in
         let scheduled_time_str = string_of_time schedule.scheduled_time in
         let status_str = match schedule.status with
@@ -334,7 +544,7 @@ let batch_insert_schedules_transactional schedules =
         let total_inserted = ref 0 in
         
         (* Process each schedule individually within the transaction *)
-        List.iter (fun schedule ->
+        List.iter (fun (schedule : email_schedule) ->
           let scheduled_date_str = string_of_date schedule.scheduled_date in
           let scheduled_time_str = string_of_time schedule.scheduled_time in
           let status_str = match schedule.status with
@@ -432,6 +642,41 @@ let batch_insert_schedules_chunked schedules chunk_size =
     in
     
     process_chunks chunks
+
+(* NEW: Smart update workflow - replaces clear_pre_scheduled_emails + batch_insert *)
+let smart_update_schedules schedules current_run_id =
+  if schedules = [] then Ok 0 else (
+  
+  Printf.printf "🚀 Starting smart schedule update with %d schedules...\n%!" (List.length schedules);
+  
+  (* Step 1: Smart insert/update with scheduler_run_id preservation *)
+  match smart_batch_insert_schedules schedules current_run_id with
+  | Error err -> Error err
+  | Ok inserted_count ->
+      (* Step 2: Clean up schedules that are no longer needed *)
+      match smart_clear_outdated_schedules schedules with
+      | Error err -> Error err
+      | Ok _ ->
+          Printf.printf "🎉 Smart update complete! Processed %d schedules\n%!" inserted_count;
+          Ok inserted_count
+  )
+
+(* Legacy function for backward compatibility *)
+let update_schedules_legacy schedules _current_run_id =
+  Printf.printf "⚠️  Using legacy update method (clear all + insert all)\n%!";
+  match clear_pre_scheduled_emails () with
+  | Error err -> Error err
+  | Ok _ ->
+      match batch_insert_schedules_chunked schedules 1000 with
+      | Error err -> Error err
+      | Ok count -> Ok count
+
+(* Main entry point - uses smart update by default *)
+let update_email_schedules ?(use_smart_update=true) schedules current_run_id =
+  if use_smart_update then
+    smart_update_schedules schedules current_run_id
+  else
+    update_schedules_legacy schedules current_run_id
 
 (* Get sent emails for followup *)
 let get_sent_emails_for_followup lookback_days =

@@ -30,11 +30,15 @@ let run_high_performance_scheduler db_path =
       let _ = Scheduler.Zip_data.ensure_loaded () in
       Printf.printf "✅ ZIP data loaded\n";
       
-      (* Clear existing pre-scheduled emails *)
-      Printf.printf "🧹 Clearing pre-scheduled emails...\n";
-      (match clear_pre_scheduled_emails () with
-       | Ok _changes -> Printf.printf "   Cleared pre-scheduled emails\n"
-       | Error err -> Printf.printf "   Warning: Failed to clear emails: %s\n" (string_of_db_error err));
+      (* Generate run_id for this scheduling run *)
+      let scheduler_run_id = 
+        let now = Unix.time () in
+        let tm = Unix.localtime now in
+        Printf.sprintf "run_%04d%02d%02d_%02d%02d%02d" 
+          (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday 
+          tm.tm_hour tm.tm_min tm.tm_sec
+      in
+      Printf.printf "🆔 Generated scheduler run ID: %s\n" scheduler_run_id;
       
       (* PERFORMANCE OPTIMIZATION: Use query-driven contact fetching *)
       Printf.printf "📊 Loading contacts using query-driven approach...\n";
@@ -93,12 +97,11 @@ let run_high_performance_scheduler db_path =
            | Ok balanced_schedules ->
                Printf.printf "   Load balancing complete\n";
                
-               (* PERFORMANCE OPTIMIZATION: Use batch insert with transactions *)
-               Printf.printf "💾 Inserting schedules using high-performance batch operations...\n";
-               let chunk_size = 50 in  (* Safe chunk size for shell commands *)
-               (match batch_insert_schedules_chunked balanced_schedules chunk_size with
+               (* NEW: Smart update approach - preserves scheduler_run_id when content unchanged *)
+               Printf.printf "🧠 Using smart update to minimize diff size...\n";
+               (match update_email_schedules ~use_smart_update:true balanced_schedules scheduler_run_id with
                 | Ok changes ->
-                    Printf.printf "   Successfully inserted/updated %d email schedules in chunks\n" changes;
+                    Printf.printf "   Smart update completed: %d schedules processed\n" changes;
                     Printf.printf "✅ High-performance scheduling complete!\n\n";
                     
                     (* Display summary statistics *)
@@ -106,7 +109,9 @@ let run_high_performance_scheduler db_path =
                     Printf.printf "   • Query-driven filtering: %d/%s contacts processed (major speedup)\n" 
                       contact_count 
                       (match get_total_contact_count () with Ok total -> string_of_int total | Error _ -> "?");
-                    Printf.printf "   • Batch database operations: %d schedules in chunked transactions\n" changes;
+                    Printf.printf "   • Smart diff optimization: Preserves scheduler_run_id when content unchanged\n";
+                    Printf.printf "   • Minimal database writes: Only updates rows that actually changed\n";
+                    Printf.printf "   • Turso sync-friendly: Dramatically reduces diff file size\n";
                     Printf.printf "   • Type-safe error handling: All operations checked at compile time\n";
                     Printf.printf "   • State exclusion rules: Applied with mathematical precision\n";
                     Printf.printf "   • Load balancing: Sophisticated smoothing algorithms applied\n";
