@@ -2,7 +2,6 @@
 (* This replaces the copy/diff workflow with direct libSQL access via Rust FFI *)
 
 (* Use the new FFI module *)
-open Turso_ffi
 
 let working_database_path = "working_copy.db"
 
@@ -61,8 +60,8 @@ let print_sync_instructions () =
   Printf.printf "   3. Database changes auto-sync to Turso!\n\n%!"
 
 (* Enhanced batch insert using FFI *)
-let batch_insert_schedules schedules current_run_id =
-  match Turso_ffi.smart_batch_insert_schedules schedules current_run_id with
+let batch_insert_schedules schedules =
+  match Turso_ffi.smart_batch_insert_schedules schedules with
   | Ok affected_rows -> 
     Printf.printf "✅ FFI batch insert successful: %d rows\n%!" affected_rows;
     Ok affected_rows
@@ -83,7 +82,7 @@ let manual_sync () =
     Ok ()
   | Error err -> 
     Printf.eprintf "❌ Manual sync failed: %s\n%!" (Turso_ffi.string_of_db_error err);
-    Error (Database_native.SyncError (Turso_ffi.string_of_db_error err))
+    Error (Database_native.ConnectionError (Turso_ffi.string_of_db_error err))
 
 (* Execute batch transactions *)
 let execute_transaction statements =

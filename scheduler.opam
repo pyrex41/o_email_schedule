@@ -13,7 +13,7 @@ doc: "https://url/to/documentation"
 bug-reports: "https://github.com/username/reponame/issues"
 depends: [
   "ocaml" {>= "4.14"}
-  "dune" {>= "3.17" & >= "3.0"}
+  "dune" {>= "3.19" & >= "3.0"}
   "sqlite3" {>= "5.0.0"}
   "caqti" {>= "2.0.0"}
   "caqti-driver-sqlite3"
@@ -25,6 +25,7 @@ depends: [
   "logs"
   "alcotest"
   "bisect_ppx"
+  "ctypes"
   "odoc" {with-doc}
 ]
 build: [
@@ -42,3 +43,4 @@ build: [
   ]
 ]
 dev-repo: "git+https://github.com/username/reponame.git"
+x-maintenance-intent: ["(latest)"]

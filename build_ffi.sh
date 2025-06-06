@@ -69,7 +69,7 @@ check_dependencies() {
 build_rust_ffi() {
     print_header "🦀 Building Rust FFI Library"
     
-    print_info "Building ocaml-interop dependency..."
+    print_info "Building Rust FFI library..."
     if ! cargo build --release --lib; then
         print_error "❌ Rust FFI build failed"
         exit 1
@@ -82,9 +82,22 @@ build_rust_ffi() {
         print_error "❌ Static library not found"
         exit 1
     fi
-    
-    if [ -f "target/release/libturso_ocaml_ffi.so" ] || [ -f "target/release/libturso_ocaml_ffi.dylib" ]; then
-        print_info "✅ Dynamic library built"
+
+    print_info "Copying FFI libraries to lib/ directory..."
+    cp target/release/libturso_ocaml_ffi.a lib/
+
+    # Handle dynamic library for different platforms
+    DYN_LIB_NAME=""
+    if [ -f "target/release/libturso_ocaml_ffi.so" ]; then
+        DYN_LIB_NAME="libturso_ocaml_ffi.so"
+    elif [ -f "target/release/libturso_ocaml_ffi.dylib" ]; then
+        DYN_LIB_NAME="libturso_ocaml_ffi.dylib"
+    fi
+
+    if [ -n "$DYN_LIB_NAME" ]; then
+        # Dune expects the dynamic library to be named dll<name>.so
+        cp "target/release/$DYN_LIB_NAME" "lib/dllturso_ocaml_ffi.so"
+        print_info "✅ Dynamic library ($DYN_LIB_NAME) copied to lib/dllturso_ocaml_ffi.so"
     else
         print_warn "⚠️  Dynamic library not found (this might be expected on some platforms)"
     fi

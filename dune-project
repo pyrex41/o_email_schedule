@@ -1,4 +1,4 @@
-(lang dune 3.17)
+(lang dune 3.19)
 
 (name scheduler)
 
@@ -32,7 +32,8 @@
   yojson
   logs
   alcotest
-  bisect_ppx)
+  bisect_ppx
+  ctypes)
  (tags
   (email scheduling "business rules" campaigns)))
 

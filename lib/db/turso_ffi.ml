@@ -1,26 +1,21 @@
 (* Turso FFI Integration using OCaml-Rust FFI *)
 (* This module provides direct access to libSQL via Rust FFI, eliminating the copy/diff workflow *)
 
+open Ctypes
+open Foreign
+open Yojson.Safe.Util
+
 (* External function declarations - these come from the Rust FFI library *)
-external turso_init_runtime : unit -> unit = "turso_init_runtime"
+let turso_init_runtime = foreign "turso_init_runtime" (void @-> returning void)
+let turso_free_string = foreign "turso_free_string" (ptr char @-> returning void)
 
-external turso_create_synced_db : string -> string -> string -> (string, string) result
-  = "turso_create_synced_db"
-
-external turso_sync : string -> (unit, string) result = "turso_sync"
-
-external turso_query : string -> string -> (string list list, string) result
-  = "turso_query"
-
-external turso_execute : string -> string -> (int64, string) result = "turso_execute"
-
-external turso_execute_batch : string -> string list -> (int64, string) result
-  = "turso_execute_batch"
-
-external turso_close_connection : string -> (unit, string) result
-  = "turso_close_connection"
-
-external turso_connection_count : unit -> int = "turso_connection_count"
+let turso_create_synced_db = foreign "turso_create_synced_db" (string @-> string @-> string @-> returning (ptr char))
+let turso_sync = foreign "turso_sync" (string @-> returning (ptr char))
+let turso_query = foreign "turso_query" (string @-> string @-> returning (ptr char))
+let turso_execute = foreign "turso_execute" (string @-> string @-> returning (ptr char))
+let turso_execute_batch = foreign "turso_execute_batch" (string @-> string @-> returning (ptr char))
+let turso_close_connection = foreign "turso_close_connection" (string @-> returning (ptr char))
+let turso_connection_count = foreign "turso_connection_count" (void @-> returning int)
 
 (* High-level OCaml interface *)
 
@@ -40,6 +35,30 @@ let string_of_db_error = function
 let initialized = ref false
 let current_connection = ref None
 
+(* Helper to parse JSON response from FFI *)
+let parse_response response_str decoder =
+  try
+    let json = Yojson.Safe.from_string response_str in
+    match member "Ok" json with
+    | `Null ->
+      (match member "Error" json with
+       | `String err_msg -> Error err_msg
+       | j -> Error ("Unexpected JSON error format: " ^ Yojson.Safe.to_string j))
+    | ok_json -> Ok (decoder ok_json)
+  with
+  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | ex -> Error ("Exception in parse_response: " ^ Printexc.to_string ex)
+
+(* Helper to wrap FFI calls, handle response, and free memory *)
+let handle_ffi_call f decoder =
+  let response_ptr = f () in
+  if is_null response_ptr then
+    Error "FFI call returned null pointer"
+  else
+    let response_str : string = coerce (ptr char) string response_ptr in
+    turso_free_string response_ptr;
+    parse_response response_str decoder
+
 (* Initialize the Rust runtime (call once) *)
 let init_runtime () =
   if not !initialized then (
@@ -51,11 +70,15 @@ let init_runtime () =
 (* Create a synced database connection *)
 let create_synced_database ~db_path ~url ~token =
   init_runtime ();
-  match turso_create_synced_db db_path url token with
-  | Ok connection_id -> 
-    current_connection := Some connection_id;
-    Printf.printf "✅ Created synced database connection: %s\n%!" connection_id;
-    Ok connection_id
+  let result = handle_ffi_call
+    (fun () -> turso_create_synced_db db_path url token)
+    to_string
+  in
+  match result with
+  | Ok connection_id ->
+      current_connection := Some connection_id;
+      Printf.printf "✅ Created synced database connection: %s\n%!" connection_id;
+      Ok connection_id
   | Error msg -> Error (ConnectionError msg)
 
 (* Get current connection or error *)
@@ -67,9 +90,9 @@ let get_connection () =
 (* Sync with remote Turso *)
 let sync_database () =
   match get_connection () with
-  | Ok conn_id -> 
-    (match turso_sync conn_id with
-     | Ok () -> 
+  | Ok conn_id ->
+    (match handle_ffi_call (fun () -> turso_sync conn_id) (fun _ -> ()) with
+     | Ok _ ->
        Printf.printf "✅ Database synced successfully\n%!";
        Ok ()
      | Error msg -> Error (SyncError msg))
@@ -79,7 +102,9 @@ let sync_database () =
 let execute_query sql =
   match get_connection () with
   | Ok conn_id ->
-    (match turso_query conn_id sql with
+    (match handle_ffi_call
+      (fun () -> turso_query conn_id sql)
+      (fun json -> to_list json |> List.map (fun row -> to_list row |> List.map to_string)) with
      | Ok results -> Ok results
      | Error msg -> Error (SqlError msg))
   | Error err -> Error err
@@ -88,7 +113,7 @@ let execute_query sql =
 let execute_statement sql =
   match get_connection () with
   | Ok conn_id ->
-    (match turso_execute conn_id sql with
+    (match handle_ffi_call (fun () -> turso_execute conn_id sql) (fun json -> Int64.of_string (to_string json)) with
      | Ok affected_rows -> Ok (Int64.to_int affected_rows)
      | Error msg -> Error (SqlError msg))
   | Error err -> Error err
@@ -97,17 +122,20 @@ let execute_statement sql =
 let execute_batch statements =
   match get_connection () with
   | Ok conn_id ->
-    (match turso_execute_batch conn_id statements with
-     | Ok affected_rows -> Ok (Int64.to_int affected_rows)
-     | Error msg -> Error (SqlError msg))
+      let statements_json = Yojson.Safe.to_string (`List (List.map (fun s -> `String s) statements)) in
+      (match handle_ffi_call
+        (fun () -> turso_execute_batch conn_id statements_json)
+        (fun json -> Int64.of_string (to_string json)) with
+       | Ok affected_rows -> Ok (Int64.to_int affected_rows)
+       | Error msg -> Error (SqlError msg))
   | Error err -> Error err
 
 (* Close the current connection *)
 let close_connection () =
   match !current_connection with
   | Some conn_id ->
-    (match turso_close_connection conn_id with
-     | Ok () -> 
+    (match handle_ffi_call (fun () -> turso_close_connection conn_id) (fun _ -> ()) with
+     | Ok _ ->
        current_connection := None;
        Printf.printf "✅ Connection closed\n%!";
        Ok ()
@@ -136,7 +164,7 @@ let get_turso_config () =
 (* Initialize connection with environment variables *)
 let initialize_turso_connection () =
   match get_turso_config () with
-  | Ok (url, token) -> 
+  | Ok (url, token) ->
     create_synced_database ~db_path:working_database_path ~url ~token
   | Error err -> Error err
 
@@ -144,7 +172,7 @@ let initialize_turso_connection () =
 let get_database_connection () =
   if not !initialized then (
     match initialize_turso_connection () with
-    | Ok _conn_id -> 
+    | Ok _conn_id ->
       (* Initial sync to pull latest data *)
       (match sync_database () with
        | Ok () -> Ok "Connected via Turso FFI"
@@ -171,20 +199,19 @@ let batch_insert_with_prepared_statement _table_sql _values_list =
   Error (SqlError "Use execute_batch for batch operations with FFI")
 
 (* Smart batch insert (enhanced version using FFI) *)
-let smart_batch_insert_schedules schedules current_run_id =
+let smart_batch_insert_schedules schedules =
   if schedules = [] then Ok 0 else (
     Printf.printf "🔄 Converting schedules to SQL statements...\n%!";
     
     (* Convert schedules to SQL statements *)
     let sql_statements = List.map (fun (schedule : Types.email_schedule) ->
       Printf.sprintf 
-        "INSERT INTO email_schedules (contact_id, email_type, send_date, run_id, campaign_id, follow_up_parent_id, created_at) VALUES (%d, '%s', '%s', '%s', %s, %s, datetime('now'))"
+        "INSERT INTO email_schedules (contact_id, email_type, scheduled_date, scheduler_run_id, campaign_instance_id, created_at) VALUES (%d, '%s', '%s', '%s', %s, datetime('now'))"
         schedule.contact_id
         (Types.string_of_email_type schedule.email_type)
-        schedule.send_date
-        current_run_id
-        (match schedule.campaign_id with Some id -> string_of_int id | None -> "NULL")
-        (match schedule.follow_up_parent_id with Some id -> string_of_int id | None -> "NULL")
+        (Simple_date.string_of_date schedule.scheduled_date)
+        schedule.scheduler_run_id
+        (match schedule.campaign_instance_id with Some id -> string_of_int id | None -> "NULL")
     ) schedules in
     
     Printf.printf "🚀 Executing batch insert of %d schedules via FFI...\n%!" (List.length schedules);
