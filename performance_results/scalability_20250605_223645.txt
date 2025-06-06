@@ -1,0 +1,85 @@
+OCaml Email Scheduler Scalability Test Results
+==============================================
+Timestamp: Thu Jun  5 22:36:45 CDT 2025
+
+
+=== Scalability Test: org-206.sqlite3 ===
+
+🔥 SCALABILITY STRESS TEST
+==========================
+Testing scheduler with different lookahead windows:
+
+📊 Testing 30-day window...
+   Found 634 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 144552 words (1.1 MB)
+📊 Testing 60-day window...
+   Found 634 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 221195 words (1.7 MB)
+📊 Testing 90-day window...
+   Found 634 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 297842 words (2.3 MB)
+📊 Testing 120-day window...
+   Found 634 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 374491 words (2.9 MB)
+📊 Testing 180-day window...
+   Found 634 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 451148 words (3.4 MB)
+📊 Testing 365-day window...
+   Found 634 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 527831 words (4.0 MB)
+
+✅ Scalability test complete!
+
+=== Scalability Test: golden_dataset.sqlite3 ===
+
+🔥 SCALABILITY STRESS TEST
+==========================
+Testing scheduler with different lookahead windows:
+
+📊 Testing 30-day window...
+   Found 24613 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 4321383 words (33.0 MB)
+📊 Testing 60-day window...
+   Found 24613 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 8558786 words (65.3 MB)
+📊 Testing 90-day window...
+   Found 24613 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 12796193 words (97.6 MB)
+📊 Testing 120-day window...
+   Found 24613 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 17033603 words (130.0 MB)
+📊 Testing 180-day window...
+   Found 24613 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 21271018 words (162.3 MB)
+📊 Testing 365-day window...
+   Found 24613 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 25508501 words (194.6 MB)
+
+✅ Scalability test complete!
+
+=== Scalability Test: large_test_dataset.sqlite3 ===
+
+🔥 SCALABILITY STRESS TEST
+==========================
+Testing scheduler with different lookahead windows:
+
+📊 Testing 30-day window...
+   Found 25000 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 4396182 words (33.5 MB)
+📊 Testing 60-day window...
+   Found 25000 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 8721481 words (66.5 MB)
+📊 Testing 90-day window...
+   Found 25000 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 13046775 words (99.5 MB)
+📊 Testing 120-day window...
+   Found 25000 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 17372067 words (132.5 MB)
+📊 Testing 180-day window...
+   Found 25000 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 21697358 words (165.5 MB)
+📊 Testing 365-day window...
+   Found 25000 contacts in 0.000 seconds (inf contacts/second)
+   Memory usage: 26022819 words (198.5 MB)
+
+✅ Scalability test complete!
