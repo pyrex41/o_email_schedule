@@ -13,7 +13,7 @@ doc: "https://url/to/documentation"
 bug-reports: "https://github.com/username/reponame/issues"
 depends: [
   "ocaml" {>= "4.14"}
-  "dune" {>= "3.0" & >= "3.0"}
+  "dune" {>= "3.17" & >= "3.0"}
   "sqlite3" {>= "5.0.0"}
   "caqti" {>= "2.0.0"}
   "caqti-driver-sqlite3"

@@ -11,6 +11,7 @@ module Email_scheduler = Email_scheduler
 module Audit = Audit_simple
 
 module Db = struct
-  module Database = Database_fallback (* Use fallback until sqlite3 is available *)
+  module Database = Database_native (* Use native SQLite for maximum performance *)
+  module Database_fallback = Database_fallback (* Keep fallback for compatibility *)
   module Simple_db = Simple_db (* Keep old one for compatibility *)
 end

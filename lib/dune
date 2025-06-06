@@ -5,4 +5,5 @@
  (public_name scheduler)
  (libraries
   str
-  unix))
+  unix
+  sqlite3))
