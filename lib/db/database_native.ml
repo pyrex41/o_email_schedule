@@ -318,6 +318,121 @@ let batch_insert_schedules_native schedules =
 let batch_insert_schedules_optimized schedules =
   batch_insert_schedules_native schedules
 
+(* Batch insert with improved transaction handling - for smaller datasets *)
+let batch_insert_schedules_transactional schedules =
+  if schedules = [] then Ok 0 else
+  
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      try
+        (* Begin transaction *)
+        (match Sqlite3.exec db "BEGIN TRANSACTION" with
+         | Sqlite3.Rc.OK -> ()
+         | rc -> failwith ("Transaction begin failed: " ^ Sqlite3.Rc.to_string rc));
+        
+        let total_inserted = ref 0 in
+        
+        (* Process each schedule individually within the transaction *)
+        List.iter (fun schedule ->
+          let scheduled_date_str = string_of_date schedule.scheduled_date in
+          let scheduled_time_str = string_of_time schedule.scheduled_time in
+          let status_str = match schedule.status with
+            | PreScheduled -> "pre-scheduled"
+            | Skipped _reason -> "skipped"
+            | _ -> "unknown"
+          in
+          let skip_reason = match schedule.status with 
+            | Skipped reason -> reason 
+            | _ -> ""
+          in
+          
+          let current_year = (current_date()).year in
+          let (event_year, event_month, event_day) = match schedule.email_type with
+            | Anniversary Birthday -> (current_year, 1, 1)
+            | Anniversary EffectiveDate -> (current_year, 1, 2)
+            | Anniversary AEP -> (current_year, 9, 15)
+            | _ -> (current_year, 1, 1)
+          in
+          
+          let insert_sql = Printf.sprintf {|
+            INSERT OR REPLACE INTO email_schedules (
+              contact_id, email_type, event_year, event_month, event_day,
+              scheduled_send_date, scheduled_send_time, status, skip_reason,
+              batch_id
+            ) VALUES (%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')
+          |} 
+            schedule.contact_id
+            (string_of_email_type schedule.email_type)
+            event_year event_month event_day
+            scheduled_date_str
+            scheduled_time_str
+            status_str
+            skip_reason
+            schedule.scheduler_run_id
+          in
+          
+          match Sqlite3.exec db insert_sql with
+          | Sqlite3.Rc.OK -> incr total_inserted
+          | rc -> failwith ("Insert failed: " ^ Sqlite3.Rc.to_string rc)
+        ) schedules;
+        
+        (* Commit transaction *)
+        (match Sqlite3.exec db "COMMIT" with
+         | Sqlite3.Rc.OK -> Ok !total_inserted
+         | rc -> 
+             let _ = Sqlite3.exec db "ROLLBACK" in
+             Error (SqliteError ("Commit failed: " ^ Sqlite3.Rc.to_string rc)))
+        
+      with 
+      | Sqlite3.Error msg -> 
+          let _ = Sqlite3.exec db "ROLLBACK" in
+          Error (SqliteError msg)
+      | Failure msg ->
+          let _ = Sqlite3.exec db "ROLLBACK" in
+          Error (SqliteError msg)
+
+(* Chunked batch insert with automatic chunk size optimization *)
+let batch_insert_schedules_chunked schedules chunk_size =
+  (* For large datasets, use the optimized prepared statement approach *)
+  if List.length schedules > 1000 then
+    batch_insert_schedules_native schedules
+  else
+    (* For smaller datasets, use the transactional approach *)
+    if schedules = [] then Ok 0 else
+    
+    let rec chunk_list lst size =
+      match lst with
+      | [] -> []
+      | _ ->
+          let (chunk, rest) = 
+            let rec take n lst acc =
+              match lst, n with
+              | [], _ -> (List.rev acc, [])
+              | _, 0 -> (List.rev acc, lst)
+              | x :: xs, n -> take (n-1) xs (x :: acc)
+            in
+            take size lst []
+          in
+          chunk :: chunk_list rest size
+    in
+    
+    let chunks = chunk_list schedules chunk_size in
+    let total_inserted = ref 0 in
+    
+    let rec process_chunks remaining_chunks =
+      match remaining_chunks with
+      | [] -> Ok !total_inserted
+      | chunk :: rest ->
+          match batch_insert_schedules_transactional chunk with
+          | Ok count -> 
+              total_inserted := !total_inserted + count;
+              process_chunks rest
+          | Error err -> Error err
+    in
+    
+    process_chunks chunks
+
 (* Get sent emails for followup *)
 let get_sent_emails_for_followup lookback_days =
   let lookback_date = add_days (current_date ()) (-lookback_days) in

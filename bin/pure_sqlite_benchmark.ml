@@ -86,5 +86,9 @@ let benchmark_pure_inserts count =
       Printf.printf "\n✅ Benchmark complete!\n"
 
 let () = 
-  let count = if Array.length Sys.argv > 1 then int_of_string Sys.argv.(1) else 10000 in
+  let count = 
+    try
+      if Array.length Sys.argv > 1 then int_of_string Sys.argv.(1) else 10000
+    with Failure _ -> 10000
+  in
   benchmark_pure_inserts count 
