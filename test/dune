@@ -1,7 +1,24 @@
-(test
- (name test_scheduler_simple)
- (libraries scheduler))
+(executable
+ (public_name test_scheduler)
+ (name test_scheduler)
+ (libraries scheduler alcotest))
 
-(test
- (name test_advanced_features)
- (libraries scheduler))
+(executable
+ (public_name test_rules)
+ (name test_rules)
+ (libraries scheduler alcotest))
+
+(executable
+ (public_name test_scheduler_integration)
+ (name test_scheduler_integration)
+ (libraries scheduler alcotest))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./test_rules.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./test_scheduler_integration.exe)))
