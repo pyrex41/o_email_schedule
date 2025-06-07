@@ -11,5 +11,5 @@ module Email_scheduler = Email_scheduler
 module Audit = Audit_simple
 
 module Db = struct
-  module Database = Database_native (* Use native SQLite for maximum performance *)
+  module Database = Database (* Use native SQLite for maximum performance *)
 end

@@ -1,21 +1,29 @@
-app = "email-scheduler"
+app = "email-scheduler-ocaml"
 primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
 
+# Pass environment variables to the container
 [env]
-  OCAML_VERSION = "5.1.0"
+  GCS_BUCKET_NAME = "your-gcs-bucket-name"
+  ORG_ID = "99"
+  OCAMLLOG = "info"
 
 # For one-shot execution (no processes block needed)
 # Python will use `flyctl machine run` to execute
 
+# This is CRITICAL: Creates a persistent volume for the local DB copy
 [mounts]
   source = "scheduler_data"
   destination = "/app/data"
 
-# Resource limits
+# Resource limits for production workload
 [[vm]]
   memory = "4gb"
   cpu_kind = "performance"
-  cpus = 4 
+  cpus = 4
+
+# Allow FUSE for gcsfuse mounting
+[mounts]
+  processes = ["app"] 
