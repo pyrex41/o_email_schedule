@@ -207,7 +207,7 @@ sync_offline() {
 
 # Bidirectional sync using libSQL sync (recommended)
 libsql_sync() {
-    local db_path="${1:-$WORKING_DB}"
+    local db_path="${1:-$REPLICA_DB}"
     print_info "Performing bidirectional sync using libSQL sync..."
     
     check_env
@@ -217,7 +217,7 @@ libsql_sync() {
         print_warn "Database not found, will be created during sync."
     fi
     
-    print_info "Running libSQL bidirectional sync..."
+    print_info "Running libSQL bidirectional sync for $db_path..."
     $RUST_BINARY libsql-sync --db-path "$db_path"
     
     print_info "✅ LibSQL sync complete!"
@@ -282,16 +282,129 @@ diff() {
     fi
 }
 
-# Start background workflow (periodic sync)
+# Initialize workflow (initial setup, then manual syncs)
 workflow() {
-    print_info "Starting background sync workflow..."
-    print_info "This will run periodic syncs from Turso every 5 minutes"
-    print_info "Press Ctrl+C to stop"
+    print_info "Setting up Turso sync workflow (manual sync mode)..."
     
     check_env
     build_rust
     
+    print_info "Running initial setup..."
     $RUST_BINARY workflow --replica-path "$REPLICA_DB" --working-path "$WORKING_DB"
+    
+    print_info "🎉 Workflow setup complete!"
+    print_info ""
+    print_info "💡 Next steps - choose your sync approach:"
+    print_info "  • Recommended: ./turso-workflow.sh libsql-sync"
+    print_info "  • Legacy:      ./turso-workflow.sh push (after making changes)"
+    print_info "  • Advanced:    ./turso-workflow.sh apply-diff (after creating diff)"
+}
+
+# Initialize using dump-based workflow (recommended for broken embedded replicas)
+dump_init() {
+    print_info "Initializing using dump-based workflow (no embedded replica)..."
+    
+    check_env
+    build_rust
+    
+    print_info "Dumping remote database and creating local copy..."
+    $RUST_BINARY dump-init --db-path "$WORKING_DB"
+    
+    print_info "✅ Dump-based initialization complete!"
+    print_info "Your OCaml code can now use: $WORKING_DB"
+    print_info "Run './turso-workflow.sh dump-push' when ready to sync changes back"
+}
+
+# Push changes using dump-based workflow with batched execution
+dump_push() {
+    print_info "Pushing changes using dump-based workflow with smart optimization..."
+    
+    check_env
+    build_rust
+    
+    if [ ! -f "$WORKING_DB" ]; then
+        print_error "Working copy not found. Run './turso-workflow.sh dump-init' first."
+        exit 1
+    fi
+    
+    if [ ! -f "baseline.db" ]; then
+        print_error "Baseline database not found. Run './turso-workflow.sh dump-init' first."
+        exit 1
+    fi
+    
+    # Step 1: Generate diff to check what changed
+    print_info "Generating diff between baseline and working copy..."
+    local start_time=$(date +%s.%N)
+    
+    sqldiff --transaction baseline.db "$WORKING_DB" > "$DIFF_FILE"
+    
+    local diff_size=$(wc -c < "$DIFF_FILE")
+    local end_time=$(date +%s.%N)
+    local diff_duration
+    if check_bc; then
+        diff_duration=$(echo "$end_time - $start_time" | bc -l)
+        diff_duration=$(printf "%.3f" "$diff_duration")
+    else
+        diff_duration="<1"
+    fi
+    
+    print_info "📊 Diff generated in ${diff_duration}s - Size: $diff_size bytes"
+    
+    # Step 2: Check if there are real changes (more than just BEGIN/COMMIT)
+    if [ "$diff_size" -le 50 ]; then
+        # Check if it's just an empty transaction
+        if grep -q "^BEGIN TRANSACTION;$" "$DIFF_FILE" && grep -q "^COMMIT;$" "$DIFF_FILE"; then
+            local line_count=$(wc -l < "$DIFF_FILE")
+            if [ "$line_count" -le 3 ]; then
+                print_info "✅ No changes detected - databases are identical!"
+                print_info "🚀 Smart update optimization working perfectly"
+                print_info "💡 Skipping upload to Turso (no changes to sync)"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Step 3: There are real changes, proceed with upload
+    print_info "📤 Changes detected - proceeding with upload to Turso..."
+    
+    # Show some stats about what's changing
+    local delete_count=$(grep -c "DELETE FROM" "$DIFF_FILE" 2>/dev/null | tr -d '\n' || echo "0")
+    local insert_count=$(grep -c "INSERT INTO" "$DIFF_FILE" 2>/dev/null | tr -d '\n' || echo "0")
+    local update_count=$(grep -c "UPDATE " "$DIFF_FILE" 2>/dev/null | tr -d '\n' || echo "0")
+    local create_count=$(grep -c "CREATE " "$DIFF_FILE" 2>/dev/null | tr -d '\n' || echo "0")
+    
+    # Ensure counts are integers (fallback to 0 if parsing fails)
+    delete_count=${delete_count:-0}
+    insert_count=${insert_count:-0}
+    update_count=${update_count:-0}
+    create_count=${create_count:-0}
+    
+    if [ "$delete_count" -gt 0 ] 2>/dev/null || [ "$insert_count" -gt 0 ] 2>/dev/null || [ "$update_count" -gt 0 ] 2>/dev/null || [ "$create_count" -gt 0 ] 2>/dev/null; then
+        print_info "📈 Change summary:"
+        [ "$create_count" -gt 0 ] 2>/dev/null && print_info "   • CREATE statements: $create_count"
+        [ "$delete_count" -gt 0 ] 2>/dev/null && print_info "   • DELETE statements: $delete_count"  
+        [ "$insert_count" -gt 0 ] 2>/dev/null && print_info "   • INSERT statements: $insert_count"
+        [ "$update_count" -gt 0 ] 2>/dev/null && print_info "   • UPDATE statements: $update_count"
+    fi
+    
+    # Step 4: Apply changes to Turso with timing
+    print_info "⏱️  Applying changes to Turso with optimized batching..."
+    local upload_start=$(date +%s.%N)
+    
+    $RUST_BINARY dump-push --db-path "$WORKING_DB" --diff-file "$DIFF_FILE"
+    
+    local upload_end=$(date +%s.%N)
+    local upload_duration
+    if check_bc; then
+        upload_duration=$(echo "$upload_end - $upload_start" | bc -l)
+        upload_duration=$(printf "%.3f" "$upload_duration")
+    else
+        upload_duration="<measurement unavailable>"
+    fi
+    
+    print_info "✅ Changes successfully uploaded to Turso in ${upload_duration}s"
+    print_info "🎯 Total workflow time: diff generation (${diff_duration}s) + upload (${upload_duration}s)"
+    print_info "💡 Next time: if no changes are made, upload will be skipped entirely!"
 }
 
 # Status check
@@ -317,12 +430,30 @@ status() {
         echo "📄 Last diff: $DIFF_FILE (not found)"
     fi
     
+    if [ -f "baseline.db" ]; then
+        echo "📄 Baseline database: baseline.db ($(du -h "baseline.db" | cut -f1))"
+    else
+        echo "📄 Baseline database: baseline.db (not found)"
+    fi
+    
+    if [ -f "original_dump.sql" ]; then
+        echo "💾 Original dump: original_dump.sql ($(du -h "original_dump.sql" | cut -f1))"
+    else
+        echo "💾 Original dump: original_dump.sql (not found)"
+    fi
+    
     echo "=================="
     
     if command -v sqldiff &> /dev/null; then
         echo "✅ sqldiff: available"
     else
         echo "❌ sqldiff: not found"
+    fi
+    
+    if command -v sqlite3 &> /dev/null; then
+        echo "✅ sqlite3: available"
+    else
+        echo "❌ sqlite3: not found"
     fi
     
     if [ -f "$RUST_BINARY" ]; then
@@ -347,18 +478,25 @@ status() {
     
     echo "=================="
     echo "Available commands:"
+    echo "  Recommended: dump-init, dump-push"
     echo "  Legacy: init, push, pull, reset, diff"
-    echo "  New:    apply-diff, offline-sync"
-    echo "  Other:  workflow, status"
+    echo "  Advanced: apply-diff, offline-sync, libsql-sync"
+    echo "  Other: workflow, status"
 }
 
 # Usage information
 usage() {
     echo "Turso Sync Workflow Script"
     echo ""
-    echo "Usage: $0 {init|push|pull|reset|diff|apply-diff|offline-sync|workflow|status}"
+    echo "Usage: $0 {dump-init|dump-push|init|push|pull|reset|diff|apply-diff|offline-sync|workflow|status}"
     echo ""
-    echo "Commands:"
+    echo "🔥 RECOMMENDED COMMANDS (for broken embedded replicas):"
+    echo "  dump-init   - Initialize: dump remote DB and create local SQLite (no replica)"
+    echo "  dump-push   - Push local changes using dump-based workflow with smart optimization"
+    echo "              ✨ NEW: Automatically skips upload when no changes detected!"
+    echo "              ⚡ Optimized for OCaml smart update - minimal diffs when unchanged"
+    echo ""
+    echo "Legacy commands:"
     echo "  init        - Initialize: sync from Turso and create working copy"
     echo "  push        - Push local changes to Turso using sqldiff (legacy method)"
     echo "  pull        - Pull latest changes from Turso (preserves local changes)"
@@ -368,9 +506,9 @@ usage() {
     echo "              Use --no-sync to skip syncing to Turso after applying diff"
     echo "  offline-sync [direction] - Sync using offline sync capabilities"
     echo "              direction: pull, push, or both (default: both)"
-    echo "  libsql-sync [db-path]   - Bidirectional sync using libSQL sync (recommended)"
-    echo "              db-path: path to database file (default: working_copy.db)"
-    echo "  workflow    - Start background periodic sync (every 5 minutes)"
+    echo "  libsql-sync [db-path]   - Bidirectional sync using libSQL sync"
+    echo "              db-path: path to database file (default: local_replica.db)"
+    echo "  workflow    - Initialize workflow: setup databases for manual syncing"
     echo "  status      - Show current status of databases and tools"
     echo ""
     echo "Environment variables required:"
@@ -379,29 +517,50 @@ usage() {
     echo ""
     echo "Example workflows:"
     echo ""
+    echo "🚀 RECOMMENDED: Dump-based workflow (for broken embedded replicas):"
+    echo "  1. ./turso-workflow.sh dump-init      # Download and create local DB"
+    echo "  2. # Run your OCaml application (uses working_copy.db)"
+    echo "  3. ./turso-workflow.sh dump-push      # Push changes with smart optimization"
+    echo "     💡 Smart features:"
+    echo "       • Skips upload when no changes detected (saves time & bandwidth)"
+    echo "       • Shows detailed change statistics (CREATE/DELETE/INSERT/UPDATE counts)"  
+    echo "       • Optimized for OCaml smart update - minimal diffs when data unchanged"
+    echo ""
+    echo "Quick setup workflow (may not work with broken replicas):"
+    echo "  1. ./turso-workflow.sh workflow          # Initial setup"
+    echo "  2. # Run your OCaml application (uses working_copy.db)"
+    echo "  3. ./turso-workflow.sh libsql-sync       # Sync changes"
+    echo ""
     echo "Legacy workflow (using replica sync):"
     echo "  1. ./turso-workflow.sh init     # Initial setup"
     echo "  2. # Run your OCaml application (uses working_copy.db)"
     echo "  3. ./turso-workflow.sh diff     # Check what changed"
     echo "  4. ./turso-workflow.sh push     # Push changes to Turso"
     echo ""
-    echo "Recommended libSQL sync workflow:"
-    echo "  1. ./turso-workflow.sh libsql-sync         # Bidirectional sync with Turso"
-    echo "  2. # Run your OCaml application (uses working_copy.db)"
-    echo "  3. ./turso-workflow.sh libsql-sync         # Sync changes back to Turso"
+    echo "Advanced workflows:"
+    echo "  Manual libSQL sync:"
+    echo "    1. ./turso-workflow.sh libsql-sync         # Bidirectional sync with Turso"
+    echo "    2. # Run your OCaml application (uses working_copy.db)"
+    echo "    3. ./turso-workflow.sh libsql-sync         # Sync changes back to Turso"
     echo ""
-    echo "Alternative offline sync workflow:"
-    echo "  1. ./turso-workflow.sh offline-sync pull    # Pull from Turso"
-    echo "  2. # Run your OCaml application (uses working_copy.db)"
-    echo "  3. ./turso-workflow.sh diff                 # Check what changed"
-    echo "  4. ./turso-workflow.sh apply-diff          # Apply diff and sync to Turso"
-    echo "     OR"
-    echo "  4. ./turso-workflow.sh apply-diff --no-sync # Apply diff locally only (see timing)"
-    echo "  5. ./turso-workflow.sh offline-sync push   # Push all changes to Turso"
+    echo "  Alternative offline sync:"
+    echo "    1. ./turso-workflow.sh offline-sync pull    # Pull from Turso"
+    echo "    2. # Run your OCaml application (uses working_copy.db)"  
+    echo "    3. ./turso-workflow.sh diff                 # Check what changed"
+    echo "    4. ./turso-workflow.sh apply-diff          # Apply diff and sync to Turso"
+    echo "       OR"
+    echo "    4. ./turso-workflow.sh apply-diff --no-sync # Apply diff locally only (see timing)"
+    echo "    5. ./turso-workflow.sh offline-sync push   # Push all changes to Turso"
 }
 
 # Main script logic
 case "${1:-}" in
+    dump-init)
+        dump_init
+        ;;
+    dump-push)
+        dump_push
+        ;;
     init)
         init
         ;;
@@ -424,7 +583,7 @@ case "${1:-}" in
         sync_offline "${2:-both}"
         ;;
     libsql-sync)
-        libsql_sync "${2:-$WORKING_DB}"
+        libsql_sync "${2:-$REPLICA_DB}"
         ;;
     workflow)
         workflow

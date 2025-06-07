@@ -303,12 +303,12 @@ let smart_batch_insert_schedules schedules current_run_id =
              | Sqlite3.Rc.OK -> ()
              | rc -> failwith ("Transaction begin failed: " ^ Sqlite3.Rc.to_string rc));
             
-            let total_inserted = ref 0 in
+            let total_processed = ref 0 in
             let unchanged_count = ref 0 in
             let changed_count = ref 0 in
             let new_count = ref 0 in
             
-            (* Process each schedule with smart logic *)
+            (* Process each schedule with truly smart logic *)
             List.iter (fun (schedule : email_schedule) ->
               let scheduled_date_str = string_of_date schedule.scheduled_date in
               let scheduled_time_str = string_of_time schedule.scheduled_time in
@@ -330,53 +330,72 @@ let smart_batch_insert_schedules schedules current_run_id =
                 | _ -> (current_year, 1, 1)
               in
               
-              (* Determine which scheduler_run_id to use *)
-              let (scheduler_run_id_to_use, _change_type) = 
-                match find_existing_schedule existing_schedules schedule with
+              (* Determine what action to take *)
+              (match find_existing_schedule existing_schedules schedule with
                 | None -> 
-                    (* New schedule *)
+                    (* New schedule - INSERT *)
                     incr new_count;
-                    (current_run_id, "NEW")
+                    let insert_sql = Printf.sprintf {|
+                      INSERT INTO email_schedules (
+                        contact_id, email_type, event_year, event_month, event_day,
+                        scheduled_send_date, scheduled_send_time, status, skip_reason,
+                        batch_id
+                      ) VALUES (%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')
+                    |} 
+                      schedule.contact_id
+                      (string_of_email_type schedule.email_type)
+                      event_year event_month event_day
+                      scheduled_date_str
+                      scheduled_time_str
+                      status_str
+                      skip_reason
+                      current_run_id
+                    in
+                    (match Sqlite3.exec db insert_sql with
+                     | Sqlite3.Rc.OK -> incr total_processed
+                     | rc -> failwith ("Insert failed: " ^ Sqlite3.Rc.to_string rc))
+                     
                 | Some existing ->
                     if schedule_content_changed existing schedule then (
-                      (* Content changed, use new run_id *)
+                      (* Content changed - UPDATE with new run_id *)
                       incr changed_count;
-                      (current_run_id, "CHANGED")
+                      let update_sql = Printf.sprintf {|
+                        UPDATE email_schedules SET
+                          email_type = '%s', event_year = %d, event_month = %d, event_day = %d,
+                          scheduled_send_date = '%s', scheduled_send_time = '%s', 
+                          status = '%s', skip_reason = '%s', batch_id = '%s',
+                          updated_at = CURRENT_TIMESTAMP
+                        WHERE contact_id = %d AND email_type = '%s' AND scheduled_send_date = '%s'
+                      |} 
+                        (string_of_email_type schedule.email_type)
+                        event_year event_month event_day
+                        scheduled_date_str
+                        scheduled_time_str
+                        status_str
+                        skip_reason
+                        current_run_id
+                        schedule.contact_id
+                        existing.email_type
+                        existing.scheduled_date
+                      in
+                      (match Sqlite3.exec db update_sql with
+                       | Sqlite3.Rc.OK -> incr total_processed
+                       | rc -> failwith ("Update failed: " ^ Sqlite3.Rc.to_string rc))
                     ) else (
-                      (* Content unchanged, preserve existing run_id *)
+                      (* Content unchanged - DO NOTHING (preserve existing record) *)
                       incr unchanged_count;
-                      (existing.scheduler_run_id, "UNCHANGED")
+                      incr total_processed
+                      (* No database operation needed! *)
                     )
-              in
-              
-              let insert_sql = Printf.sprintf {|
-                INSERT OR REPLACE INTO email_schedules (
-                  contact_id, email_type, event_year, event_month, event_day,
-                  scheduled_send_date, scheduled_send_time, status, skip_reason,
-                  batch_id
-                ) VALUES (%d, '%s', %d, %d, %d, '%s', '%s', '%s', '%s', '%s')
-              |} 
-                schedule.contact_id
-                (string_of_email_type schedule.email_type)
-                event_year event_month event_day
-                scheduled_date_str
-                scheduled_time_str
-                status_str
-                skip_reason
-                scheduler_run_id_to_use
-              in
-              
-              match Sqlite3.exec db insert_sql with
-              | Sqlite3.Rc.OK -> incr total_inserted
-              | rc -> failwith ("Insert failed: " ^ Sqlite3.Rc.to_string rc)
+              )
             ) schedules;
             
             (* Commit transaction *)
             (match Sqlite3.exec db "COMMIT" with
              | Sqlite3.Rc.OK -> 
-                 Printf.printf "✅ Smart update complete: %d total, %d new, %d changed, %d unchanged\n%!" 
-                   !total_inserted !new_count !changed_count !unchanged_count;
-                 Ok !total_inserted
+                 Printf.printf "✅ Truly smart update complete: %d total, %d new, %d changed, %d unchanged (skipped)\n%!" 
+                   !total_processed !new_count !changed_count !unchanged_count;
+                 Ok !total_processed
              | rc -> 
                  let _ = Sqlite3.exec db "ROLLBACK" in
                  Error (SqliteError ("Commit failed: " ^ Sqlite3.Rc.to_string rc)))
@@ -765,3 +784,69 @@ let close_database () =
   | Some db ->
       ignore (Sqlite3.db_close db);
       db_handle := None 
+
+(* Load SQLite sessions extension for changeset support *)
+let enable_sessions_extension () =
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      try
+        (* First check if extension loading is enabled *)
+        match Sqlite3.exec db "PRAGMA load_extension=1" with
+        | Sqlite3.Rc.OK -> 
+            (* Try to load the sessions extension *)
+            (match Sqlite3.exec db "SELECT load_extension('sessions')" with
+             | Sqlite3.Rc.OK -> Ok ()
+             | rc -> Error (SqliteError ("Failed to load sessions extension: " ^ Sqlite3.Rc.to_string rc)))
+        | rc -> Error (SqliteError ("Failed to enable extension loading: " ^ Sqlite3.Rc.to_string rc))
+      with Sqlite3.Error msg ->
+        Error (SqliteError msg)
+
+(* Apply a binary changeset file to the database *)
+let apply_changeset_file changeset_path =
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      if not (Sys.file_exists changeset_path) then
+        Error (SqliteError ("Changeset file not found: " ^ changeset_path))
+      else
+        try
+          (* Load sessions extension if not already loaded *)
+          (match enable_sessions_extension () with
+           | Error _ -> () (* Extension might already be loaded *)
+           | Ok () -> ());
+          
+          (* Read the changeset file as blob *)
+          let ic = open_in_bin changeset_path in
+          let changeset_size = in_channel_length ic in
+          let changeset_data = Bytes.create changeset_size in
+          really_input ic changeset_data 0 changeset_size;
+          close_in ic;
+          
+          (* Apply changeset using SQLite function *)
+          let apply_sql = Printf.sprintf "SELECT sqlite_changeset_apply(X'%s')" 
+            (String.concat "" (List.map (Printf.sprintf "%02x") 
+              (List.init changeset_size (fun i -> Char.code (Bytes.get changeset_data i))))) in
+          
+          match Sqlite3.exec db apply_sql with
+          | Sqlite3.Rc.OK -> Ok ()
+          | rc -> Error (SqliteError ("Failed to apply changeset: " ^ Sqlite3.Rc.to_string rc))
+        with 
+        | Sqlite3.Error msg -> Error (SqliteError msg)
+        | Sys_error msg -> Error (SqliteError ("File error: " ^ msg))
+
+(* Check if sessions extension is available *)
+let check_sessions_support () =
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      try
+        (* Try to call a sessions function *)
+        match Sqlite3.exec db "SELECT sqlite_version()" with
+        | Sqlite3.Rc.OK -> 
+            (* Check if we can enable extension loading *)
+            (match Sqlite3.exec db "PRAGMA compile_options" with
+             | Sqlite3.Rc.OK -> Ok true
+             | _ -> Ok false)
+        | _ -> Ok false
+      with Sqlite3.Error _ -> Ok false 

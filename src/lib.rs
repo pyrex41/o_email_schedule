@@ -86,7 +86,7 @@ pub extern "C" fn turso_create_synced_db(
         let rt = &*RUNTIME;
 
         rt.block_on(async {
-            match Builder::new_remote_replica(&db_path, url, token).build().await {
+            match Builder::new_synced_database(&db_path, url, token).build().await {
                 Ok(db) => {
                     let arc_db = Arc::new(db);
                     let mut connections = CONNECTIONS.lock().unwrap();
