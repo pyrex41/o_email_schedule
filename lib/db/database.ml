@@ -492,7 +492,6 @@ let smart_batch_insert_schedules schedules current_run_id =
               let (event_year, event_month, event_day) = match schedule.email_type with
                 | Anniversary Birthday -> (current_year, 1, 1)
                 | Anniversary EffectiveDate -> (current_year, 1, 2)
-                | Anniversary AEP -> (current_year, 9, 15)
                 | _ -> (current_year, 1, 1)
               in
               
@@ -715,7 +714,6 @@ let batch_insert_schedules_native schedules =
         let (event_year, event_month, event_day) = match schedule.email_type with
           | Anniversary Birthday -> (current_year, 1, 1)
           | Anniversary EffectiveDate -> (current_year, 1, 2)
-          | Anniversary AEP -> (current_year, 9, 15)
           | _ -> (current_year, 1, 1)
         in
         
@@ -780,7 +778,6 @@ let batch_insert_schedules_transactional schedules =
           let (event_year, event_month, event_day) = match schedule.email_type with
             | Anniversary Birthday -> (current_year, 1, 1)
             | Anniversary EffectiveDate -> (current_year, 1, 2)
-            | Anniversary AEP -> (current_year, 9, 15)
             | _ -> (current_year, 1, 1)
           in
           
@@ -907,7 +904,7 @@ let get_sent_emails_for_followup lookback_days =
     FROM email_schedules 
     WHERE status IN ('sent', 'delivered')
     AND scheduled_send_date >= '%s'
-    AND email_type IN ('birthday', 'effective_date', 'aep')
+    AND email_type IN ('birthday', 'effective_date')
     ORDER BY contact_id, sent_time DESC
   |} (string_of_date lookback_date) in
   
@@ -973,8 +970,52 @@ let ensure_performance_indexes () =
 
 (* Initialize database and ensure schema *)
 let initialize_database () =
+  (* Ensure AEP campaign type exists *)
+  let ensure_aep_campaign () =
+    let check_aep_query = "SELECT COUNT(*) FROM campaign_types WHERE name = 'aep'" in
+    match execute_sql_safe check_aep_query with
+    | Ok [["0"]] ->
+        (* AEP campaign doesn't exist, create it *)
+        let insert_aep_sql = {|
+          INSERT INTO campaign_types (
+            name, respect_exclusion_windows, enable_followups, days_before_event,
+            target_all_contacts, priority, active, spread_evenly, skip_failed_underwriting
+          ) VALUES (
+            'aep', 1, 1, 30, 1, 30, 1, 0, 0
+          )
+        |} in
+        execute_sql_no_result insert_aep_sql
+    | Ok _ -> Ok () (* AEP already exists *)
+    | Error err -> Error err
+  in
+
+  (* Ensure default AEP campaign instance exists *)
+  let ensure_aep_instance () =
+    let check_instance_query = "SELECT COUNT(*) FROM campaign_instances WHERE campaign_type = 'aep'" in
+    match execute_sql_safe check_instance_query with
+    | Ok [["0"]] ->
+        (* No AEP instance exists, create default one *)
+        let insert_instance_sql = {|
+          INSERT INTO campaign_instances (
+            campaign_type, instance_name, email_template, sms_template,
+            active_start_date, active_end_date, spread_start_date, spread_end_date,
+            target_states, target_carriers, metadata, created_at, updated_at
+          ) VALUES (
+            'aep', 'aep_default', 'aep_template', 'aep_sms_template',
+            NULL, NULL, NULL, NULL, 'ALL', 'ALL', '{}',
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+        |} in
+        execute_sql_no_result insert_instance_sql
+    | Ok _ -> Ok () (* AEP instance already exists *)
+    | Error err -> Error err
+  in
+
   match ensure_performance_indexes () with
-  | Ok () -> Ok ()
+  | Ok () -> 
+      (match ensure_aep_campaign () with
+       | Ok () -> ensure_aep_instance ()
+       | Error err -> Error err)
   | Error err -> Error err
 
 (* Close database connection *)

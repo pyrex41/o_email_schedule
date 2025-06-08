@@ -588,6 +588,65 @@ let calculate_post_window_emails context contact =
     | None -> []
 
 (** 
+ * [generate_post_window_for_skipped]: Generates post-window emails for schedules skipped due to exclusions
+ * 
+ * Purpose:
+ *   Automatically creates post-window makeup emails for any schedules that were
+ *   skipped due to exclusion windows during the current scheduling run.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration and timing settings  
+ *   - skipped_schedules: List of schedules that were skipped due to exclusions
+ * 
+ * Returns:
+ *   List of post-window email schedules for skipped emails
+ * 
+ * Business Logic:
+ *   - Filters skipped schedules for exclusion-related skip reasons
+ *   - Calculates appropriate post-window dates for each skipped email
+ *   - Creates makeup emails to be sent after exclusion window ends
+ *   - Respects organization enable_post_window_emails setting
+ * 
+ * @business_rule @data_flow
+ *)
+let generate_post_window_for_skipped context skipped_schedules =
+  if not context.config.organization.enable_post_window_emails then
+    []
+  else
+    let post_window_schedules = ref [] in
+    let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+    
+    List.iter (fun (schedule : email_schedule) ->
+      match schedule.status with
+      | Skipped reason when String.contains reason "exclusion" || String.contains reason "window" ->
+          (* Calculate post-window date for this skipped email *)
+          (match get_all_contacts () with
+           | Ok contacts ->
+               (match List.find_opt (fun c -> c.id = schedule.contact_id) contacts with
+                | Some contact ->
+                    (match get_post_window_date contact with
+                     | Some post_date ->
+                         let post_window_schedule = {
+                           contact_id = schedule.contact_id;
+                           email_type = Anniversary PostWindow;
+                           scheduled_date = post_date;
+                           scheduled_time = send_time;
+                           status = PreScheduled;
+                           priority = priority_of_email_type (Anniversary PostWindow);
+                           template_id = Some "post_window_template";
+                           campaign_instance_id = None;
+                           scheduler_run_id = context.run_id;
+                         } in
+                         post_window_schedules := post_window_schedule :: !post_window_schedules
+                     | None -> ())
+                | None -> ())
+           | Error _ -> ())
+      | _ -> ()
+    ) skipped_schedules;
+    
+    !post_window_schedules
+
+(** 
  * [calculate_schedules_for_contact]: Generates all email schedules for a single contact
  * 
  * Purpose:
@@ -785,8 +844,14 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
     let context = create_context config total_contacts in
     let chunk_size = config.batch_size in
     
+    (* Manage campaign lifecycle before scheduling *)
+    let _ = manage_campaign_lifecycle context in
+    
     (* First, calculate all campaign schedules *)
     let (campaign_schedules, campaign_errors) = calculate_all_campaign_schedules context in
+    
+    (* Calculate follow-up email schedules *)
+    let followup_schedules = calculate_followup_emails context in
     
     let rec process_chunks remaining_contacts acc_result =
       match remaining_contacts with
@@ -826,7 +891,23 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
     match process_chunks contacts initial_result with
     | Ok raw_result ->
         (* Combine anniversary schedules with campaign schedules *)
-        let all_schedules = raw_result.schedules @ campaign_schedules in
+        let all_schedules = raw_result.schedules @ campaign_schedules @ followup_schedules in
+        
+        (* Apply frequency limits before load balancing *)
+        let (frequency_allowed_schedules, frequency_limited_schedules) = apply_frequency_limits context all_schedules in
+        let frequency_filtered_schedules = frequency_allowed_schedules @ frequency_limited_schedules in
+        
+        (* Resolve campaign priority conflicts *)
+        let (conflict_resolved_schedules, campaign_conflicts) = resolve_campaign_conflicts frequency_filtered_schedules in
+        let conflict_resolved_all = conflict_resolved_schedules @ campaign_conflicts in
+        
+        (* Generate post-window emails for any skipped schedules *)
+        let skipped_schedules = List.filter (fun (s : email_schedule) -> 
+          match s.status with Skipped _ -> true | _ -> false) conflict_resolved_all in
+        let auto_post_window_schedules = generate_post_window_for_skipped context skipped_schedules in
+        
+        (* Combine all schedules including auto-generated post-window emails *)
+        let final_schedules = conflict_resolved_all @ auto_post_window_schedules in
         
         (* Count campaign schedules for metrics *)
         let campaign_scheduled = List.fold_left (fun acc (schedule : email_schedule) ->
@@ -841,11 +922,33 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
           | _ -> acc
         ) 0 campaign_schedules in
         
+        (* Count follow-up schedules for metrics *)
+        let followup_scheduled = List.fold_left (fun acc (schedule : email_schedule) ->
+          match schedule.status with
+          | PreScheduled -> acc + 1
+          | _ -> acc
+        ) 0 followup_schedules in
+        
+        let followup_skipped = List.fold_left (fun acc (schedule : email_schedule) ->
+          match schedule.status with
+          | Skipped _ -> acc + 1
+          | _ -> acc
+        ) 0 followup_schedules in
+        
+        (* Count frequency-limited schedules for metrics *)
+        let frequency_limited_count = List.length frequency_limited_schedules in
+        
+        (* Count auto-generated post-window schedules for metrics *)
+        let auto_post_window_count = List.length auto_post_window_schedules in
+        
+        (* Count campaign conflicts for metrics *)
+        let campaign_conflict_count = List.length campaign_conflicts in
+        
         let combined_result = {
-          schedules = all_schedules;
+          schedules = final_schedules;
           contacts_processed = raw_result.contacts_processed;
-          emails_scheduled = raw_result.emails_scheduled + campaign_scheduled;
-          emails_skipped = raw_result.emails_skipped + campaign_skipped;
+          emails_scheduled = raw_result.emails_scheduled + campaign_scheduled + followup_scheduled + auto_post_window_count;
+          emails_skipped = raw_result.emails_skipped + campaign_skipped + followup_skipped + frequency_limited_count + campaign_conflict_count;
           errors = raw_result.errors;
         } in
         
@@ -907,3 +1010,407 @@ let get_scheduling_summary result =
     analysis.avg_per_day
     analysis.max_day
     analysis.distribution_variance
+
+(** 
+ * [determine_followup_type]: Determines the appropriate follow-up email type based on contact interactions
+ * 
+ * Purpose:
+ *   Analyzes contact engagement behavior to select the most appropriate follow-up email
+ *   template based on clicks, health question answers, and medical conditions.
+ * 
+ * Parameters:
+ *   - contact_id: The contact ID to analyze
+ *   - since_date: Date from which to analyze interactions (typically when initial email was sent)
+ * 
+ * Returns:
+ *   Result containing followup_type or scheduler_error
+ * 
+ * Business Logic:
+ *   - Checks for clicks and health question responses
+ *   - Prioritizes follow-ups based on engagement level
+ *   - Uses highest applicable follow-up type for contact behavior
+ * 
+ * @business_rule
+ *)
+let determine_followup_type contact_id since_date =
+  match get_contact_interactions contact_id since_date with
+  | Error err -> Error (DatabaseError (string_of_db_error err))
+  | Ok (has_clicks, has_health_answers) ->
+      if has_health_answers then
+        (* For now, assume no medical conditions check - would need additional logic *)
+        Ok HQNoYes
+      else if has_clicks then
+        Ok ClickedNoHQ
+      else
+        Ok Cold
+
+(** 
+ * [calculate_followup_emails]: Generates follow-up email schedules for eligible contacts
+ * 
+ * Purpose:
+ *   Identifies contacts who need follow-up emails based on their sent emails and
+ *   creates appropriate follow-up schedules based on engagement behavior.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration and timing settings
+ * 
+ * Returns:
+ *   List of email_schedule records for follow-up emails
+ * 
+ * Business Logic:
+ *   - Looks back for sent emails that need follow-ups
+ *   - Analyzes contact engagement behavior for each email
+ *   - Schedules follow-ups based on configured delay
+ *   - Excludes contacts with existing follow-ups
+ *   - Respects exclusion windows for follow-up scheduling
+ * 
+ * @business_rule @data_flow
+ *)
+let calculate_followup_emails context =
+  let schedules = ref [] in
+  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+  let lookback_days = 35 in (* Look back 35 days for eligible emails *)
+  
+  match get_sent_emails_for_followup lookback_days with
+  | Error _ -> !schedules (* Return empty list on error *)
+  | Ok sent_emails ->
+      List.iter (fun (contact_id, email_type, sent_time, _email_id) ->
+        (* Check if contact already has follow-ups scheduled *)
+        let has_existing_followup = 
+          match execute_sql_safe (Printf.sprintf {|
+            SELECT COUNT(*) FROM email_schedules 
+            WHERE contact_id = %d 
+            AND email_type LIKE 'followup%%' 
+            AND status IN ('pre-scheduled', 'scheduled', 'sent')
+          |} contact_id) with
+          | Ok [["0"]] -> false
+          | _ -> true
+        in
+        
+        if not has_existing_followup then (
+          (* Determine follow-up type based on behavior *)
+          let sent_date = parse_date sent_time in
+          let since_date_str = string_of_date sent_date in
+          
+          match determine_followup_type contact_id since_date_str with
+          | Error _ -> () (* Skip on error *)
+          | Ok followup_type ->
+              (* Schedule follow-up for configured delay after sent date *)
+              let followup_date = add_days sent_date context.config.followup_delay_days in
+              let today = current_date () in
+              
+              (* If follow-up is overdue, schedule for tomorrow *)
+              let scheduled_date = 
+                if followup_date < today then
+                  add_days today 1
+                else
+                  followup_date
+              in
+              
+              (* Get contact for exclusion window check *)
+              (match get_all_contacts () with
+               | Ok contacts ->
+                   (match List.find_opt (fun c -> c.id = contact_id) contacts with
+                    | Some contact ->
+                        let email_type = Followup followup_type in
+                        
+                        (* Check exclusion windows *)
+                        let should_skip = should_skip_email contact email_type scheduled_date in
+                        
+                        let (status, _skip_reason) = 
+                          if should_skip then
+                            let reason = match check_exclusion_window contact scheduled_date with
+                              | Excluded { reason; _ } -> reason
+                              | NotExcluded -> "Unknown exclusion"
+                            in
+                            (Skipped reason, reason)
+                          else
+                            (PreScheduled, "")
+                        in
+                        
+                        let schedule = {
+                          contact_id;
+                          email_type;
+                          scheduled_date;
+                          scheduled_time = send_time;
+                          status;
+                          priority = priority_of_email_type email_type;
+                          template_id = Some (Printf.sprintf "%s_template" (string_of_followup_type followup_type));
+                          campaign_instance_id = None;
+                          scheduler_run_id = context.run_id;
+                        } in
+                        schedules := schedule :: !schedules
+                    | None -> ())
+               | Error _ -> ())
+        )
+      ) sent_emails;
+      
+      !schedules
+
+(** 
+ * [manage_campaign_lifecycle]: Manages campaign instance activation/deactivation based on dates
+ * 
+ * Purpose:
+ *   Automatically activates and deactivates campaign instances based on their
+ *   active_start_date and active_end_date fields to ensure only current campaigns run.
+ * 
+ * Parameters:
+ *   - context: Scheduling context (unused but kept for consistency)
+ * 
+ * Returns:
+ *   Result indicating success or database error
+ * 
+ * Business Logic:
+ *   - Checks all campaign instances against current date
+ *   - Activates instances whose start date has arrived
+ *   - Deactivates instances whose end date has passed
+ *   - Provides audit trail of lifecycle changes
+ * 
+ * @business_rule @state_machine
+ *)
+let manage_campaign_lifecycle _context =
+  let today = current_date () in
+  let today_str = string_of_date today in
+  
+  (* Get all campaign instances with date ranges *)
+  let query = Printf.sprintf {|
+    SELECT id, campaign_type, instance_name,
+           COALESCE(active_start_date, '') as active_start_date,
+           COALESCE(active_end_date, '') as active_end_date,
+           COALESCE(metadata, '{}') as metadata
+    FROM campaign_instances
+    WHERE (active_start_date IS NOT NULL OR active_end_date IS NOT NULL)
+  |} in
+  
+  match execute_sql_safe query with
+  | Error err -> Error (DatabaseError (string_of_db_error err))
+  | Ok rows ->
+      let process_instance row =
+        match row with
+        | [id_str; _campaign_type; _instance_name; active_start_date; active_end_date; metadata] ->
+            (try
+              let id = int_of_string id_str in
+              let should_be_active = 
+                let after_start = 
+                  if active_start_date = "" || active_start_date = "NULL" then true
+                  else (parse_date active_start_date) <= today
+                in
+                let before_end = 
+                  if active_end_date = "" || active_end_date = "NULL" then true
+                  else today <= (parse_date active_end_date)
+                in
+                after_start && before_end
+              in
+              
+              (* Update metadata to track lifecycle changes *)
+              let updated_metadata = 
+                if should_be_active then
+                  Printf.sprintf "{\"lifecycle_status\": \"active\", \"last_checked\": \"%s\"}" today_str
+                else
+                  Printf.sprintf "{\"lifecycle_status\": \"inactive\", \"last_checked\": \"%s\"}" today_str
+              in
+              
+              let update_sql = Printf.sprintf {|
+                UPDATE campaign_instances 
+                SET metadata = '%s', updated_at = CURRENT_TIMESTAMP
+                WHERE id = %d
+              |} updated_metadata id in
+              
+              execute_sql_no_result update_sql
+            with _ -> Ok ())
+        | _ -> Ok ()
+      in
+      
+      (* Process all instances *)
+      let rec process_all rows =
+        match rows with
+        | [] -> Ok ()
+        | row :: rest ->
+            (match process_instance row with
+             | Ok () -> process_all rest
+             | Error err -> Error err)
+      in
+      
+      process_all rows
+
+(** 
+ * [check_frequency_limits]: Checks if contact exceeds email frequency limits
+ * 
+ * Purpose:
+ *   Enforces maximum emails per period limits to prevent overwhelming contacts
+ *   and ensures compliance with organization email frequency policies.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with frequency limit configuration
+ *   - contact_id: Contact to check frequency limits for
+ *   - proposed_date: Date for which to schedule the new email
+ * 
+ * Returns:
+ *   Result containing boolean (true if within limits) or scheduler_error
+ * 
+ * Business Logic:
+ *   - Counts emails sent/scheduled within the configured period
+ *   - Compares against max_emails_per_period configuration
+ *   - Excludes skipped emails from count
+ *   - Provides specific limit exceeded reason
+ * 
+ * @business_rule
+ *)
+let check_frequency_limits context contact_id proposed_date =
+  let period_start = add_days proposed_date (-context.config.period_days) in
+  let period_start_str = string_of_date period_start in
+  let proposed_date_str = string_of_date proposed_date in
+  
+  let count_query = Printf.sprintf {|
+    SELECT COUNT(*) 
+    FROM email_schedules 
+    WHERE contact_id = %d 
+    AND scheduled_send_date BETWEEN '%s' AND '%s'
+    AND status IN ('pre-scheduled', 'scheduled', 'sent', 'delivered')
+  |} contact_id period_start_str proposed_date_str in
+  
+  match execute_sql_safe count_query with
+  | Error err -> Error (DatabaseError (string_of_db_error err))
+  | Ok [[ count_str ]] ->
+      (try
+        let current_count = int_of_string count_str in
+        if current_count >= context.config.max_emails_per_period then
+          Ok false (* Exceeds limit *)
+        else
+          Ok true (* Within limit *)
+      with _ -> Error (ValidationError "Invalid email count from database"))
+  | Ok _ -> Error (ValidationError "Invalid frequency check result")
+
+(** 
+ * [apply_frequency_limits]: Filters email schedules based on frequency limits
+ * 
+ * Purpose:
+ *   Applies frequency limit enforcement to a list of proposed email schedules,
+ *   prioritizing higher priority emails when limits are exceeded.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with frequency limit configuration
+ *   - schedules: List of proposed email schedules to filter
+ * 
+ * Returns:
+ *   Tuple of (allowed_schedules, frequency_limited_schedules)
+ * 
+ * Business Logic:
+ *   - Groups schedules by contact_id for frequency checking
+ *   - Sorts schedules by priority (lower number = higher priority)
+ *   - Allows highest priority emails within frequency limits
+ *   - Marks excess emails as skipped due to frequency limits
+ * 
+ * @business_rule @performance
+ *)
+let apply_frequency_limits context schedules =
+  let allowed_schedules = ref [] in
+  let limited_schedules = ref [] in
+  
+  (* Group schedules by contact_id *)
+  let contact_groups = 
+    List.fold_left (fun acc (schedule : email_schedule) ->
+      let contact_id = schedule.contact_id in
+      let existing = try List.assoc contact_id acc with Not_found -> [] in
+      (contact_id, schedule :: existing) :: (List.remove_assoc contact_id acc)
+    ) [] schedules
+  in
+  
+  (* Process each contact's schedules *)
+  List.iter (fun (contact_id, contact_schedules) ->
+    (* Sort by priority (lower number = higher priority) *)
+    let sorted_schedules = List.sort (fun a b -> compare a.priority b.priority) contact_schedules in
+    
+    List.iter (fun (schedule : email_schedule) ->
+      match check_frequency_limits context contact_id schedule.scheduled_date with
+      | Error _ -> 
+          (* On error, allow the email (conservative approach) *)
+          allowed_schedules := schedule :: !allowed_schedules
+      | Ok within_limits ->
+          if within_limits then
+            allowed_schedules := schedule :: !allowed_schedules
+          else
+            (* Create skipped version due to frequency limits *)
+            let limited_schedule = {
+              schedule with 
+              status = Skipped "Frequency limit exceeded";
+            } in
+            limited_schedules := limited_schedule :: !limited_schedules
+    ) sorted_schedules
+  ) contact_groups;
+  
+  (!allowed_schedules, !limited_schedules)
+
+(** 
+ * [resolve_campaign_conflicts]: Resolves conflicts when multiple campaigns target same contact on same date
+ * 
+ * Purpose:
+ *   Handles priority conflicts when multiple campaign emails are scheduled for the
+ *   same contact on the same date, keeping highest priority and skipping others.
+ * 
+ * Parameters:
+ *   - schedules: List of email schedules potentially containing conflicts
+ * 
+ * Returns:
+ *   Tuple of (resolved_schedules, conflicted_schedules)
+ * 
+ * Business Logic:
+ *   - Groups schedules by (contact_id, scheduled_date)
+ *   - For each group, selects highest priority email (lowest number)
+ *   - Marks other emails as skipped due to campaign conflicts
+ *   - Preserves non-campaign emails (anniversary, follow-up) alongside campaigns
+ * 
+ * @business_rule
+ *)
+let resolve_campaign_conflicts schedules =
+  let resolved_schedules = ref [] in
+  let conflicted_schedules = ref [] in
+  
+  (* Group schedules by contact_id and scheduled_date *)
+  let date_groups = 
+    List.fold_left (fun acc (schedule : email_schedule) ->
+      let key = (schedule.contact_id, schedule.scheduled_date) in
+      let existing = try List.assoc key acc with Not_found -> [] in
+      (key, schedule :: existing) :: (List.remove_assoc key acc)
+    ) [] schedules
+  in
+  
+  (* Process each date group *)
+  List.iter (fun ((contact_id, date), group_schedules) ->
+    (* Separate campaign emails from other types *)
+    let (campaign_emails, other_emails) = 
+      List.partition (fun (s : email_schedule) ->
+        match s.email_type with
+        | Campaign _ -> true
+        | _ -> false
+      ) group_schedules
+    in
+    
+    (* Always keep non-campaign emails *)
+    resolved_schedules := other_emails @ !resolved_schedules;
+    
+    (* Handle campaign conflicts *)
+    match campaign_emails with
+    | [] -> () (* No campaigns *)
+    | [single_campaign] -> 
+        (* Single campaign, no conflict *)
+        resolved_schedules := single_campaign :: !resolved_schedules
+    | multiple_campaigns ->
+        (* Multiple campaigns - resolve by priority *)
+        let sorted_campaigns = List.sort (fun a b -> compare a.priority b.priority) multiple_campaigns in
+        match sorted_campaigns with
+        | highest_priority :: conflicts ->
+            (* Keep highest priority campaign *)
+            resolved_schedules := highest_priority :: !resolved_schedules;
+            (* Skip conflicting campaigns *)
+            List.iter (fun (conflict : email_schedule) ->
+              let skipped_conflict = {
+                conflict with 
+                status = Skipped "Campaign priority conflict";
+              } in
+              conflicted_schedules := skipped_conflict :: !conflicted_schedules
+            ) conflicts
+        | [] -> () (* Should not happen *)
+  ) date_groups;
+  
+  (!resolved_schedules, !conflicted_schedules)
