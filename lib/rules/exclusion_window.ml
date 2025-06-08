@@ -1,11 +1,13 @@
-open Types
+open Jitter
 open Dsl
+open Date_time
+open Types
 open Date_calc
 open Simple_date
 
 type exclusion_result = 
   | NotExcluded
-  | Excluded of { reason: string; window_end: Simple_date.date option }
+  | Excluded of { reason: string; window_end: Date_time.date option }
 
 let check_birthday_exclusion contact check_date =
   match contact.state, contact.birthday with

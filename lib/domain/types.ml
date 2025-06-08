@@ -39,8 +39,8 @@ type contact = {
   email: string;
   zip_code: string option;
   state: state option;
-  birthday: Simple_date.date option;
-  effective_date: Simple_date.date option;
+  birthday: Date_time.date option;
+  effective_date: Date_time.date option;
   carrier: string option; (* Insurance carrier code *)
   failed_underwriting: bool; (* Whether contact failed health questions *)
 }
@@ -48,8 +48,8 @@ type contact = {
 type email_schedule = {
   contact_id: int;
   email_type: email_type;
-  scheduled_date: Simple_date.date;
-  scheduled_time: Simple_date.time;
+  scheduled_date: Date_time.date;
+  scheduled_time: Date_time.time;
   status: schedule_status;
   priority: int;
   template_id: string option;
@@ -140,32 +140,32 @@ type campaign_instance = {
   instance_name: string;
   email_template: string option;
   sms_template: string option;
-  active_start_date: Simple_date.date option;
-  active_end_date: Simple_date.date option;
-  spread_start_date: Simple_date.date option;
-  spread_end_date: Simple_date.date option;
+  active_start_date: Date_time.date option;
+  active_end_date: Date_time.date option;
+  spread_start_date: Date_time.date option;
+  spread_end_date: Date_time.date option;
   target_states: string option;
   target_carriers: string option;
   metadata: string option;
-  created_at: Simple_date.datetime;
-  updated_at: Simple_date.datetime;
+  created_at: Date_time.datetime;
+  updated_at: Date_time.datetime;
 }
 
 type contact_campaign = {
   id: int;
   contact_id: int;
   campaign_instance_id: int;
-  trigger_date: Simple_date.date option;
+  trigger_date: Date_time.date option;
   status: string;
   metadata: string option;
-  created_at: Simple_date.datetime;
-  updated_at: Simple_date.datetime;
+  created_at: Date_time.datetime;
+  updated_at: Date_time.datetime;
 }
 
 (* Audit trail types *)
 type scheduler_checkpoint = {
   id: int;
-  run_timestamp: Simple_date.datetime;
+  run_timestamp: Date_time.datetime;
   scheduler_run_id: string;
   contacts_checksum: string;
   schedules_before_checksum: string option;
@@ -175,12 +175,12 @@ type scheduler_checkpoint = {
   emails_skipped: int option;
   status: string;
   error_message: string option;
-  completed_at: Simple_date.datetime option;
+  completed_at: Date_time.datetime option;
 }
 
 (* Load balancing types *)
 type daily_stats = {
-  date: Simple_date.date;
+  date: Date_time.date;
   total_count: int;
   ed_count: int;
   campaign_count: int;

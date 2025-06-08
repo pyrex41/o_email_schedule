@@ -20,6 +20,7 @@ depends: [
   "caqti-lwt"
   "lwt" {>= "5.6.0"}
   "ptime"
+  "ptime-clock"
   "timedesc"
   "yojson"
   "logs"

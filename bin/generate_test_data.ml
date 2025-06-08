@@ -144,7 +144,53 @@ let create_schema db =
   if exit_code <> 0 then
     failwith ("Failed to create schema in " ^ db)
 
-(* Generate batch of contacts *)
+(* Helper function to convert contact data to string array for prepared statement *)
+let contact_to_values first_name last_name email carrier plan_type effective_date birth_date tobacco_user gender state zip_code agent_id phone =
+  [|
+    first_name; last_name; email; carrier; plan_type; effective_date; birth_date;
+    string_of_int tobacco_user; gender; state; zip_code; string_of_int agent_id; phone; "active"
+  |]
+
+(* Fixed batch generation using prepared statements instead of huge SQL strings *)
+let generate_contacts_batch_fixed db start_id count =
+  printf "Generating contacts batch %d-%d using prepared statements...\n%!" start_id (start_id + count - 1);
+  
+  (* Set database path for the Database module *)
+  Scheduler.Db.Database_native.set_db_path db;
+  
+  (* Prepare contact data *)
+  let contacts_data = ref [] in
+  
+  for i = 0 to count - 1 do
+    let first_name = random_from_array first_names in
+    let last_name = random_from_array last_names in
+    let email = random_email first_name last_name start_id i in
+    let carrier = random_from_array carriers in
+    let plan_type = random_from_array plan_types in
+    let state = random_from_array states in
+    let zip_code = random_zip_code state in
+    let phone = random_phone () in
+    let birth_date = random_date_between 1940 2005 in
+    let effective_date = random_date_between 2020 2024 in
+    let tobacco_user = Random.int 2 in
+    let gender = if Random.bool () then "M" else "F" in
+    let agent_id = 1 + Random.int 50 in
+    
+    let values = contact_to_values first_name last_name email carrier plan_type 
+                   effective_date birth_date tobacco_user gender state zip_code agent_id phone in
+    contacts_data := values :: !contacts_data;
+  done;
+  
+  (* Use the existing batch_insert_with_prepared_statement function *)
+  let insert_sql = "INSERT INTO contacts (first_name, last_name, email, current_carrier, plan_type, effective_date, birth_date, tobacco_user, gender, state, zip_code, agent_id, phone_number, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" in
+  
+  match Scheduler.Db.Database_native.batch_insert_with_prepared_statement insert_sql (List.rev !contacts_data) with
+  | Ok inserted_count ->
+      printf "✅ Successfully inserted %d contacts\n%!" inserted_count
+  | Error err ->
+      failwith ("Failed to insert contacts batch: " ^ Scheduler.Db.Database_native.string_of_db_error err)
+
+(* Generate batch of contacts - keeping the old version for fallback *)
 let generate_contacts_batch db start_id count =
   printf "Generating contacts batch %d-%d...\n%!" start_id (start_id + count - 1);
   
@@ -190,10 +236,11 @@ let generate_contacts_batch db start_id count =
   if exit_code <> 0 then
     failwith ("Failed to insert contacts batch starting at " ^ string_of_int start_id)
 
-(* Generate large dataset *)
-let generate_dataset db_name total_contacts batch_size =
+(* Generate large dataset with fixed batch insertion *)
+let generate_dataset db_name total_contacts batch_size use_prepared_statements =
   printf "🚀 Generating %d contacts in database: %s\n" total_contacts db_name;
-  printf "Using batch size: %d contacts per batch\n\n" batch_size;
+  printf "Using batch size: %d contacts per batch\n" batch_size;
+  printf "Method: %s\n\n" (if use_prepared_statements then "Prepared statements (FIXED)" else "SQL strings (legacy)");
   
   (* Initialize random seed *)
   Random.self_init ();
@@ -219,7 +266,13 @@ let generate_dataset db_name total_contacts batch_size =
     
     if current_batch_size > 0 then (
       let batch_start = Unix.time () in
-      generate_contacts_batch db_name start_id current_batch_size;
+      
+      (* Use the new fixed method or fall back to legacy *)
+      if use_prepared_statements then
+        generate_contacts_batch_fixed db_name start_id current_batch_size
+      else
+        generate_contacts_batch db_name start_id current_batch_size;
+        
       let batch_time = Unix.time () -. batch_start in
       
       printf "   Batch %d/%d completed in %.2f seconds (%.0f contacts/second)\n%!" 
@@ -275,10 +328,10 @@ let main () =
   if argc < 2 then (
     printf "Usage: %s <command> [args]\n" Sys.argv.(0);
     printf "Commands:\n";
-    printf "  generate <db_name> <count> [batch_size]  - Generate test database\n";
-    printf "  analyze                                  - Analyze golden dataset patterns\n";
+    printf "  generate <db_name> <count> [batch_size] [--use-prepared]  - Generate test database\n";
+    printf "  analyze                                                   - Analyze golden dataset patterns\n";
     printf "\nExamples:\n";
-    printf "  %s generate large_test_dataset.sqlite3 25000 1000\n" Sys.argv.(0);
+    printf "  %s generate large_test_dataset.sqlite3 25000 1000 --use-prepared\n" Sys.argv.(0);
     printf "  %s generate huge_test_dataset.sqlite3 100000 2000\n" Sys.argv.(0);
     printf "  %s analyze\n" Sys.argv.(0);
     exit 1
@@ -290,7 +343,11 @@ let main () =
       let db_name = Sys.argv.(2) in
       let count = int_of_string Sys.argv.(3) in
       let batch_size = if argc >= 5 then int_of_string Sys.argv.(4) else 1000 in
-      generate_dataset db_name count batch_size
+      let use_prepared = 
+        argc >= 6 && Sys.argv.(5) = "--use-prepared" ||
+        argc >= 7 && Sys.argv.(6) = "--use-prepared"
+      in
+      generate_dataset db_name count batch_size use_prepared
   | "analyze" ->
       analyze_golden_dataset ()
   | _ ->
