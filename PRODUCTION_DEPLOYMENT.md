@@ -1,5 +1,56 @@
 # Production Deployment Guide
 
+⚠️ **DEPRECATED: This guide uses Google Cloud Storage (GCS) which has been replaced with Tigris for better performance and cost-effectiveness.**
+
+**Please use the new [Tigris Deployment Guide](./TIGRIS_DEPLOYMENT.md) instead.**
+
+---
+
+## Why We Switched to Tigris
+
+This project has migrated from Google Cloud Storage to Tigris Object Storage for the following reasons:
+
+1. **Zero Egress Costs**: Tigris eliminates data transfer fees, crucial for multi-environment access
+2. **Superior Performance**: 5-10x better performance for small objects (like SQLite WAL segments)
+3. **Optimized for Databases**: TigrisFS provides filesystem semantics optimized for database workflows
+4. **Fly.io Integration**: Native integration with better routing and performance
+5. **Strong Consistency**: Built on FoundationDB for enterprise-grade reliability
+
+## Migration Instructions
+
+If you have an existing deployment using GCS, follow these steps to migrate to Tigris:
+
+### 1. Backup Your Current Database
+
+```bash
+# Download current database from GCS
+gsutil cp gs://your-gcs-bucket/org-data/99.db ./migration-backup-$(date +%Y%m%d).db
+```
+
+### 2. Set Up Tigris
+
+Follow the [Tigris Deployment Guide](./TIGRIS_DEPLOYMENT.md) to:
+- Create a Tigris bucket on Fly.io
+- Configure the new environment variables
+- Deploy the updated application
+
+### 3. Upload Your Database to Tigris
+
+```bash
+# Upload your database to the new Tigris bucket
+aws s3 cp ./migration-backup-$(date +%Y%m%d).db s3://your-tigris-bucket/org-data/99.db \
+  --endpoint-url https://fly.storage.tigris.dev
+```
+
+### 4. Verify Migration
+
+Deploy and run your scheduler to ensure it works correctly with Tigris.
+
+## Legacy GCS Documentation
+
+<details>
+<summary>Click to expand legacy GCS deployment instructions (for reference only)</summary>
+
 This guide covers the production deployment of the OCaml Email Scheduler on Fly.io with Google Cloud Storage (GCS) integration.
 
 ## Architecture Overview
@@ -289,3 +340,5 @@ For issues with:
 - **Fly.io Platform**: Use `flyctl doctor` and Fly.io support
 - **GCS Integration**: Verify authentication and bucket permissions
 - **Database Issues**: Check SQLite file integrity and sync logs
+
+</details>
