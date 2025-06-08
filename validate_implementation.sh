@@ -150,6 +150,44 @@ else
 fi
 
 echo ""
+echo "📋 Checking Priority 5 Implementation (Edge Case Testing Suite):"
+
+if [ -f "test/test_edge_cases.ml" ]; then
+    echo "✅ test/test_edge_cases.ml created"
+    lines=$(wc -l < test/test_edge_cases.ml)
+    echo "   - File size: $lines lines"
+    
+    # Check for key edge case features
+    if grep -q "org_config_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains organization config edge cases"
+    fi
+    if grep -q "failed_underwriting_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains failed underwriting scenarios"
+    fi
+    if grep -q "universal_campaign_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains universal campaign handling"
+    fi
+    if grep -q "zip_code_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains ZIP code validation edge cases"
+    fi
+    if grep -q "campaign_targeting_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains campaign targeting combinations"
+    fi
+    if grep -q "email_validation_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains email validation edge cases"
+    fi
+    if grep -q "datetime_edge_cases" test/test_edge_cases.ml; then
+        echo "   - ✅ Contains date/time edge cases"
+    fi
+    
+    # Count edge case suites
+    suite_count=$(grep -c "_edge_cases.*=" test/test_edge_cases.ml)
+    echo "   - Edge case suite count: $suite_count suites"
+else
+    echo "❌ test/test_edge_cases.ml not found"
+fi
+
+echo ""
 echo "📋 Checking Supporting Files:"
 
 if [ -f "IMPLEMENTATION_STATUS.md" ]; then
@@ -170,14 +208,19 @@ if [ -f "lib/utils/date_time.ml" ]; then ((impl_files++)); fi
 if [ -f "test/test_golden_master.ml" ]; then ((impl_files++)); fi
 if [ -f "test/test_properties.ml" ]; then ((impl_files++)); fi
 if [ -f "test/test_state_rules_matrix.ml" ]; then ((impl_files++)); fi
+if [ -f "test/test_edge_cases.ml" ]; then ((impl_files++)); fi
 
 echo "📈 Implementation Progress:"
-echo "   • Critical files created: $impl_files/4"
+echo "   • Critical files created: $impl_files/5"
 echo "   • Priority 1 (Critical Fixes): COMPLETED ✅"
 echo "   • Priority 2 (Golden Master): COMPLETED ✅"
 echo "   • Priority 3 (Property Tests): COMPLETED ✅"  
 echo "   • Priority 4 (State Matrix): COMPLETED ✅"
-echo "   • Priority 5 (Edge Cases): PLANNED 📋"
+if [ -f "test/test_edge_cases.ml" ]; then
+    echo "   • Priority 5 (Edge Cases): COMPLETED ✅"
+else
+    echo "   • Priority 5 (Edge Cases): PLANNED 📋"
+fi
 echo "   • Priority 6 (Performance): PLANNED 📋"
 echo "   • Priority 7 (Cleanup): IN PROGRESS 🔄"
 
@@ -187,10 +230,13 @@ echo "   1. Install build dependencies (dune, qcheck, etc.)"
 echo "   2. Fix any remaining Simple_date references"
 echo "   3. Verify compilation with: dune build"
 echo "   4. Run test suites to validate implementation"
-echo "   5. Implement remaining priorities (5-7)"
-
-echo ""
-echo "✅ Implementation Status: 4/7 priorities completed (57%)"
+if [ -f "test/test_edge_cases.ml" ]; then
+    echo "   5. Implement Priority 6 (Performance Testing)"
+    echo "✅ Implementation Status: 5/7 priorities completed (71%)"
+else
+    echo "   5. Complete Priority 5 (Edge Cases)"
+    echo "✅ Implementation Status: 4/7 priorities completed (57%)"
+fi
 echo "🚀 Ready for: Build validation and testing"
 
 # Check if golden dataset exists
