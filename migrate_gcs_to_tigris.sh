@@ -131,13 +131,22 @@ if [ -f "fly.toml" ]; then
     cp fly.toml "$BACKUP_DIR/fly.toml.backup"
     echo "✅ Backed up original fly.toml"
     
-    # Update bucket name in fly.toml
-    if sed -i.tmp "s/GCS_BUCKET_NAME = .*/BUCKET_NAME = \"$TIGRIS_BUCKET\"/" fly.toml && rm fly.toml.tmp; then
+    # Update bucket name in fly.toml (cross-platform compatible)
+    if cp fly.toml fly.toml.tmp && \
+       sed "s/GCS_BUCKET_NAME = .*/BUCKET_NAME = \"$TIGRIS_BUCKET\"/" fly.toml.tmp > fly.toml && \
+       rm fly.toml.tmp; then
+        
         # Add Tigris-specific environment variables if not present
-        if ! grep -q "AWS_ENDPOINT_URL_S3" fly.toml; then
+        # Check and add AWS_REGION if missing
+        if ! grep -q "AWS_REGION" fly.toml; then
             echo "  AWS_REGION = \"auto\"" >> fly.toml
+        fi
+        
+        # Check and add AWS_ENDPOINT_URL_S3 if missing
+        if ! grep -q "AWS_ENDPOINT_URL_S3" fly.toml; then
             echo "  AWS_ENDPOINT_URL_S3 = \"https://fly.storage.tigris.dev\"" >> fly.toml
         fi
+        
         echo "✅ Updated fly.toml configuration"
     else
         echo "⚠️  Could not automatically update fly.toml"
