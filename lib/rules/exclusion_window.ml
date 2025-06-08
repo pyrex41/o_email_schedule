@@ -3,7 +3,6 @@ open Dsl
 open Date_time
 open Types
 open Date_calc
-open Simple_date
 
 type exclusion_result = 
   | NotExcluded
