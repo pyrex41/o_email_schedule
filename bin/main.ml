@@ -1,12 +1,12 @@
 open Scheduler.Types
-open Scheduler.Simple_date
+open Scheduler.Date_time
 open Scheduler.Contact
 open Scheduler.Email_scheduler
 open Scheduler.Load_balancer
 
 let create_sample_contact id email zip birthday_year birthday_month birthday_day ed_year ed_month ed_day =
-  let birthday = if birthday_year > 0 then Some (make_date birthday_year birthday_month birthday_day) else None in
-  let effective_date = if ed_year > 0 then Some (make_date ed_year ed_month ed_day) else None in
+  let birthday = if birthday_year > 0 then Some (birthday_year, birthday_month, birthday_day) else None in
+  let effective_date = if ed_year > 0 then Some (ed_year, ed_month, ed_day) else None in
   let contact = {
     id;
     email;
@@ -14,6 +14,8 @@ let create_sample_contact id email zip birthday_year birthday_month birthday_day
     state = None;
     birthday;
     effective_date;
+    carrier = None;
+    failed_underwriting = false;
   } in
   update_contact_state contact
 

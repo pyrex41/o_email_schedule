@@ -156,7 +156,7 @@ let generate_contacts_batch_fixed db start_id count =
   printf "Generating contacts batch %d-%d using prepared statements...\n%!" start_id (start_id + count - 1);
   
   (* Set database path for the Database module *)
-  Scheduler.Db.Database_native.set_db_path db;
+  Scheduler.Db.Database.set_db_path db;
   
   (* Prepare contact data *)
   let contacts_data = ref [] in
@@ -184,11 +184,11 @@ let generate_contacts_batch_fixed db start_id count =
   (* Use the existing batch_insert_with_prepared_statement function *)
   let insert_sql = "INSERT INTO contacts (first_name, last_name, email, current_carrier, plan_type, effective_date, birth_date, tobacco_user, gender, state, zip_code, agent_id, phone_number, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" in
   
-  match Scheduler.Db.Database_native.batch_insert_with_prepared_statement insert_sql (List.rev !contacts_data) with
+  match Scheduler.Db.Database.batch_insert_with_prepared_statement insert_sql (List.rev !contacts_data) with
   | Ok inserted_count ->
       printf "✅ Successfully inserted %d contacts\n%!" inserted_count
   | Error err ->
-      failwith ("Failed to insert contacts batch: " ^ Scheduler.Db.Database_native.string_of_db_error err)
+      failwith ("Failed to insert contacts batch: " ^ Scheduler.Db.Database.string_of_db_error err)
 
 (* Generate batch of contacts - keeping the old version for fallback *)
 let generate_contacts_batch db start_id count =

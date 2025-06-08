@@ -4,7 +4,6 @@ FROM ocaml/opam:alpine-5.1 as builder
 # Install system dependencies
 RUN sudo apk add --no-cache \
     sqlite-dev \
-    libffi-dev \
     gmp-dev \
     openssl-dev \
     pkg-config \

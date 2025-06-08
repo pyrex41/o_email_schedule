@@ -8,9 +8,7 @@
   unix
   sqlite3
   lwt
-  ctypes
-  ctypes.foreign
-  yojson)
- ; Link against the Rust FFI library
- (foreign_archives turso_ocaml_ffi)
- (c_library_flags (-lpthread -ldl -lm)))
+  yojson
+  ptime
+  ptime.clock.os)
+)

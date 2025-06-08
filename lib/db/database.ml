@@ -1,5 +1,5 @@
 open Types
-open Simple_date
+open Date_time
 
 (* Native high-performance database interface using proper SQLite bindings *)
 
@@ -53,12 +53,13 @@ let parse_datetime datetime_str =
                  else
                    int_of_string second_str
                in
-               make_datetime date (make_time hour minute second)
+               let time_tuple = (hour, minute, second) in
+               make_datetime date time_tuple
            | _ -> current_datetime ())
       | [date_part] ->
           (* Date only, assume midnight *)
           let date = parse_date date_part in
-          make_datetime date (make_time 0 0 0)
+          make_datetime date (0, 0, 0)
       | _ -> current_datetime ()
     with _ -> current_datetime ()
 
@@ -199,12 +200,14 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
   let lookback_window_start = add_days today (-lookback_days) in
   
   (* Format dates for SQL pattern matching *)
-  let start_str = Printf.sprintf "%02d-%02d" lookback_window_start.month lookback_window_start.day in
-  let end_str = Printf.sprintf "%02d-%02d" active_window_end.month active_window_end.day in
+  let (_, start_month, start_day) = lookback_window_start in
+  let (_, end_month, end_day) = active_window_end in
+  let start_str = Printf.sprintf "%02d-%02d" start_month start_day in
+  let end_str = Printf.sprintf "%02d-%02d" end_month end_day in
   
   (* Updated query to include new fields with fallback for old schema *)
   let query = 
-    if lookback_window_start.month <= active_window_end.month then
+    if start_month <= end_month then
       (* Window doesn't cross year boundary - simple case *)
       Printf.sprintf {|
         SELECT id, email, 
@@ -342,12 +345,20 @@ let schedule_content_changed existing_record (new_schedule : email_schedule) =
   in
   let new_email_type_str = string_of_email_type new_schedule.email_type in
   
-  (* Compare meaningful fields *)
-  existing_record.email_type <> new_email_type_str ||
-  existing_record.scheduled_date <> new_scheduled_date_str ||
-  existing_record.scheduled_time <> new_scheduled_time_str ||
-  existing_record.status <> new_status_str ||
-  existing_record.skip_reason <> new_skip_reason
+  let content_changed = 
+    existing_record.email_type <> new_email_type_str ||
+    existing_record.scheduled_date <> new_scheduled_date_str ||
+    existing_record.scheduled_time <> new_scheduled_time_str ||
+    existing_record.status <> new_status_str ||
+    existing_record.skip_reason <> new_skip_reason
+  in
+  
+  (* Use audit fields for business logic - log preservation of original scheduler_run_id *)
+  if not content_changed then
+    Printf.printf "📝 Content unchanged for contact %d - preserving original scheduler_run_id: %s (created: %s)\n%!" 
+      new_schedule.contact_id existing_record.scheduler_run_id existing_record.created_at;
+  
+  content_changed
 
 (* Find existing schedule for a new schedule *)
 let find_existing_schedule existing_schedules (new_schedule : email_schedule) =
@@ -398,7 +409,7 @@ let smart_batch_insert_schedules schedules current_run_id =
                 | _ -> ""
               in
               
-              let current_year = (current_date()).year in
+              let (current_year, _, _) = current_date () in
               let (event_year, event_month, event_day) = match schedule.email_type with
                 | Anniversary Birthday -> (current_year, 1, 1)
                 | Anniversary EffectiveDate -> (current_year, 1, 2)
@@ -433,8 +444,11 @@ let smart_batch_insert_schedules schedules current_run_id =
                      
                 | Some existing ->
                     if schedule_content_changed existing schedule then (
-                      (* Content changed - UPDATE with new run_id *)
+                      (* Content changed - UPDATE with new run_id and log audit trail *)
                       incr changed_count;
+                      Printf.printf "🔄 Updating schedule for contact %d: %s → %s (original run: %s, created: %s)\n%!" 
+                        schedule.contact_id existing.status status_str existing.scheduler_run_id existing.created_at;
+                      
                       let update_sql = Printf.sprintf {|
                         UPDATE email_schedules SET
                           email_type = '%s', event_year = %d, event_month = %d, event_day = %d,
@@ -458,10 +472,12 @@ let smart_batch_insert_schedules schedules current_run_id =
                        | Sqlite3.Rc.OK -> incr total_processed
                        | rc -> failwith ("Update failed: " ^ Sqlite3.Rc.to_string rc))
                     ) else (
-                      (* Content unchanged - DO NOTHING (preserve existing record) *)
+                      (* Content unchanged - preserve existing record with full audit info *)
                       incr unchanged_count;
-                      incr total_processed
-                      (* No database operation needed! *)
+                      incr total_processed;
+                      Printf.printf "✅ Preserving unchanged record for contact %d (run: %s, age: %s)\n%!" 
+                        schedule.contact_id existing.scheduler_run_id existing.created_at;
+                      (* No database operation needed - smart preservation! *)
                     )
               )
             ) schedules;
@@ -587,7 +603,7 @@ let batch_insert_schedules_native schedules =
           | _ -> ""
         in
         
-        let current_year = (current_date()).year in
+        let (current_year, _, _) = current_date () in
         let (event_year, event_month, event_day) = match schedule.email_type with
           | Anniversary Birthday -> (current_year, 1, 1)
           | Anniversary EffectiveDate -> (current_year, 1, 2)
@@ -652,7 +668,7 @@ let batch_insert_schedules_transactional schedules =
             | _ -> ""
           in
           
-          let current_year = (current_date()).year in
+          let (current_year, _, _) = current_date () in
           let (event_year, event_month, event_day) = match schedule.email_type with
             | Anniversary Birthday -> (current_year, 1, 1)
             | Anniversary EffectiveDate -> (current_year, 1, 2)
@@ -1131,5 +1147,5 @@ let get_contacts_for_campaign campaign_instance =
   match get_all_contacts () with
   | Error err -> Error err
   | Ok all_contacts ->
-      let filtered_contacts = List.filter (contact_matches_targeting ~campaign_instance) all_contacts in
+      let filtered_contacts = List.filter (fun contact -> contact_matches_targeting contact campaign_instance) all_contacts in
       Ok filtered_contacts
