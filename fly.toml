@@ -6,9 +6,11 @@ primary_region = "ord"
 
 # Pass environment variables to the container
 [env]
-  GCS_BUCKET_NAME = "your-gcs-bucket-name"
+  BUCKET_NAME = "your-tigris-bucket-name"
   ORG_ID = "99"
   OCAMLLOG = "info"
+  AWS_REGION = "auto"
+  AWS_ENDPOINT_URL_S3 = "https://fly.storage.tigris.dev"
 
 # For one-shot execution (no processes block needed)
 # Python will use `flyctl machine run` to execute
@@ -24,6 +26,6 @@ primary_region = "ord"
   cpu_kind = "performance"
   cpus = 4
 
-# Allow FUSE for gcsfuse mounting
+# Allow FUSE for TigrisFS mounting
 [mounts]
   processes = ["app"] 

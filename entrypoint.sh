@@ -4,40 +4,53 @@ set -e
 # Enable strict error handling
 set -euo pipefail
 
-echo "🚀 Starting Email Scheduler with GCS Sync..."
+echo "🚀 Starting Email Scheduler with Tigris Sync..."
 
 # Check for required environment variables
-if [ -z "${GCS_KEYFILE_JSON:-}" ]; then
-    echo "❌ ERROR: GCS_KEYFILE_JSON environment variable is not set"
-    echo "Please set this secret with: flyctl secrets set GCS_KEYFILE_JSON='<keyfile-content>'"
+if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+    echo "❌ ERROR: AWS_ACCESS_KEY_ID environment variable is not set"
+    echo "Please set this secret with: flyctl secrets set AWS_ACCESS_KEY_ID='<your-tigris-access-key>'"
     exit 1
 fi
 
-if [ -z "${GCS_BUCKET_NAME:-}" ]; then
-    echo "❌ ERROR: GCS_BUCKET_NAME environment variable is not set"
+if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+    echo "❌ ERROR: AWS_SECRET_ACCESS_KEY environment variable is not set"
+    echo "Please set this secret with: flyctl secrets set AWS_SECRET_ACCESS_KEY='<your-tigris-secret-key>'"
+    exit 1
+fi
+
+if [ -z "${BUCKET_NAME:-}" ]; then
+    echo "❌ ERROR: BUCKET_NAME environment variable is not set"
     echo "Please set this in fly.toml or as a secret"
     exit 1
 fi
 
-# Write GCS keyfile to temporary location
-echo "🔐 Setting up GCS authentication..."
-echo "$GCS_KEYFILE_JSON" > /tmp/gcs-key.json
-export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-key.json
+# Set Tigris endpoint (Fly.io optimized endpoint)
+export AWS_ENDPOINT_URL_S3="${AWS_ENDPOINT_URL_S3:-https://fly.storage.tigris.dev}"
+export AWS_REGION="${AWS_REGION:-auto}"
 
-# Mount GCS bucket using gcsfuse
-echo "📁 Mounting GCS bucket: $GCS_BUCKET_NAME..."
-gcsfuse --key-file /tmp/gcs-key.json "$GCS_BUCKET_NAME" /gcs
+echo "🔐 Setting up Tigris authentication..."
+echo "Using endpoint: $AWS_ENDPOINT_URL_S3"
+echo "Bucket: $BUCKET_NAME"
+
+# Mount Tigris bucket using TigrisFS
+echo "📁 Mounting Tigris bucket: $BUCKET_NAME..."
+tigrisfs "$BUCKET_NAME" /tigris \
+    --file-mode=0666 \
+    --dir-mode=0777 \
+    --endpoint="$AWS_ENDPOINT_URL_S3" \
+    --region="$AWS_REGION"
 
 # Verify mount was successful
-if ! mountpoint -q /gcs; then
-    echo "❌ ERROR: Failed to mount GCS bucket"
+if ! mountpoint -q /tigris; then
+    echo "❌ ERROR: Failed to mount Tigris bucket"
     exit 1
 fi
 
-echo "✅ GCS bucket mounted successfully"
+echo "✅ Tigris bucket mounted successfully"
 
 # Define paths
-REMOTE_DB_PATH="/gcs/org-data/99.db"
+REMOTE_DB_PATH="/tigris/org-data/99.db"
 LOCAL_DB_PATH="/app/data/working_copy.db"
 ORG_ID="${ORG_ID:-99}"
 
@@ -50,13 +63,13 @@ if [ ! -f "$REMOTE_DB_PATH" ]; then
     echo "This might be the first run - creating empty local database"
     touch "$LOCAL_DB_PATH"
 else
-    echo "📥 Syncing database from GCS to local working copy..."
+    echo "📥 Syncing database from Tigris to local working copy..."
     
     # Use sqlite3_rsync to sync from remote to local
     if sqlite3_rsync "$REMOTE_DB_PATH" "$LOCAL_DB_PATH"; then
-        echo "✅ Database synced from GCS successfully"
+        echo "✅ Database synced from Tigris successfully"
     else
-        echo "❌ ERROR: Failed to sync database from GCS"
+        echo "❌ ERROR: Failed to sync database from Tigris"
         exit 1
     fi
 fi
@@ -84,26 +97,23 @@ else
     echo "⚠️  Attempting to sync back partial changes..."
 fi
 
-# Sync the modified database back to GCS
-echo "📤 Syncing modified database back to GCS..."
+# Sync the modified database back to Tigris
+echo "📤 Syncing modified database back to Tigris..."
 
 # Ensure remote directory exists
 mkdir -p "$(dirname "$REMOTE_DB_PATH")"
 
 if sqlite3_rsync "$LOCAL_DB_PATH" "$REMOTE_DB_PATH"; then
-    echo "✅ Database synced back to GCS successfully"
+    echo "✅ Database synced back to Tigris successfully"
 else
-    echo "❌ ERROR: Failed to sync database back to GCS"
+    echo "❌ ERROR: Failed to sync database back to Tigris"
     exit 1
 fi
 
-# Clean up
+# Clean up and unmount Tigris (optional - container will terminate anyway)
 echo "🧹 Cleaning up..."
-rm -f /tmp/gcs-key.json
-
-# Unmount GCS (optional - container will terminate anyway)
-if mountpoint -q /gcs; then
-    fusermount -u /gcs || echo "⚠️  Could not unmount GCS (non-critical)"
+if mountpoint -q /tigris; then
+    fusermount -u /tigris || echo "⚠️  Could not unmount Tigris (non-critical)"
 fi
 
 echo "🎉 Email Scheduler completed successfully!"
