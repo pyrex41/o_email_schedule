@@ -1,5 +1,5 @@
+open Date_time
 open Dsl
-open Simple_date
 
 let pre_window_buffer_days = 60
 
@@ -10,7 +10,8 @@ let in_exclusion_window check_date window anchor_date =
   let check_year anchor =
     let base_date = 
       if window.use_month_start then
-        { anchor with day = 1 }
+        let (year, month, _) = anchor in
+        (year, month, 1)  (* Use first day of month *)
       else
         anchor
     in
@@ -21,8 +22,9 @@ let in_exclusion_window check_date window anchor_date =
   in
   
   check_year anchor_date ||
-  let prev_year_anchor = { anchor_date with year = anchor_date.year - 1 } in
-  let next_year_anchor = { anchor_date with year = anchor_date.year + 1 } in
+  let (year, month, day) = anchor_date in
+  let prev_year_anchor = (year - 1, month, day) in
+  let next_year_anchor = (year + 1, month, day) in
   check_year prev_year_anchor || check_year next_year_anchor
 
 let calculate_jitter ~contact_id ~event_type ~year ~window_days =
@@ -30,4 +32,4 @@ let calculate_jitter ~contact_id ~event_type ~year ~window_days =
   (Hashtbl.hash hash_input) mod window_days - (window_days / 2)
 
 let schedule_time_ct hour minute =
-  { hour; minute; second = 0 }
+  ((hour, minute, 0), 0)  (* ((hour, minute, second), tz_offset) - CT is 0 offset from our system time *)

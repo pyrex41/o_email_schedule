@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Use `eval $(opam env)` liberally to make sure that environment you are running is correct before building dune/ocaml. Do not change the dune version in files -- try this instead and let the user know if there are still issues.

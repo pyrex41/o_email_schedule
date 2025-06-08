@@ -1,5 +1,5 @@
+open Date_time
 open Types
-open Simple_date
 open Date_calc
 
 module DailyStats = struct
@@ -66,10 +66,11 @@ let is_ed_over_soft_limit config stats =
 
 let apply_jitter ~original_date ~contact_id ~email_type ~window_days =
   try
+    let (year, _, _) = original_date in
     let jitter = calculate_jitter 
       ~contact_id 
       ~event_type:(string_of_email_type email_type)
-      ~year:original_date.year 
+      ~year 
       ~window_days in
     let new_date = add_days original_date jitter in
     Ok new_date

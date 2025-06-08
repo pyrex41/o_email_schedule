@@ -1,5 +1,4 @@
 (* Database interface for the email scheduler *)
-open Types
 
 (* Error handling *)
 type db_error = 
@@ -36,3 +35,15 @@ val get_contact_interactions : int -> string -> (bool * bool, db_error) result
 val optimize_sqlite_for_bulk_inserts : unit -> (unit, db_error) result
 val restore_sqlite_safety : unit -> (unit, db_error) result
 val ensure_performance_indexes : unit -> (unit, db_error) result
+
+(* Low-level database access for testing *)
+val execute_sql_safe : string -> (string list list, db_error) result
+val execute_sql_no_result : string -> (unit, db_error) result
+val batch_insert_with_prepared_statement : string -> string array list -> (int, db_error) result
+
+(* Campaign system functions *)
+val get_active_campaign_instances : unit -> (Types.campaign_instance list, db_error) result
+val get_campaign_type_config : string -> (Types.campaign_type_config, db_error) result
+val get_contact_campaigns_for_instance : int -> (Types.contact_campaign list, db_error) result
+val get_all_contacts_for_campaign : unit -> (Types.contact list, db_error) result
+val get_contacts_for_campaign : Types.campaign_instance -> (Types.contact list, db_error) result

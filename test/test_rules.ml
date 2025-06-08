@@ -1,7 +1,6 @@
 open Alcotest
-open Types
-open Simple_date
-open Exclusion_window
+open Scheduler.Types
+open Scheduler.Exclusion_window
 
 (* Helper function to create a test contact *)
 let make_contact ?(state=None) ?(birthday=None) ?(effective_date=None) () =
@@ -12,10 +11,12 @@ let make_contact ?(state=None) ?(birthday=None) ?(effective_date=None) () =
     state = state;
     birthday = birthday;
     effective_date = effective_date;
+    carrier = None;
+    failed_underwriting = false;
   }
 
 (* Helper function to create a date *)
-let make_date year month day = { year; month; day }
+let make_date year month day = (year, month, day)
 
 let test_ca_birthday_exclusion () =
   let contact = make_contact 

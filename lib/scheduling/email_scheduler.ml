@@ -1,8 +1,10 @@
 open Types
-open Simple_date
+open Date_time
 open Date_calc
 open Exclusion_window
 open Load_balancer
+open Config
+open Database
 
 type scheduling_context = {
   config: Config.t;
@@ -13,9 +15,10 @@ type scheduling_context = {
 
 let generate_run_id () =
   let now = current_datetime () in
+  let (date, ((hour, minute, second), _)) = Ptime.to_date_time now in
+  let (year, month, day) = date in
   Printf.sprintf "run_%04d%02d%02d_%02d%02d%02d" 
-    now.date.year now.date.month now.date.day
-    now.time.hour now.time.minute now.time.second
+    year month day hour minute second
 
 let create_context config total_contacts =
   let run_id = generate_run_id () in
@@ -69,11 +72,13 @@ let is_contact_valid_for_scheduling config campaign_instance contact =
       config.organization.send_without_zipcode_for_universal
 
 (* Enhanced effective date validation with configurable timing *)
-let should_send_effective_date_email config contact effective_date =
+let should_send_effective_date_email config _contact effective_date =
   let today = current_date () in
+  let (today_year, today_month, _) = today in
+  let (ed_year, ed_month, _) = effective_date in
   let months_since_effective = 
-    let years_diff = today.year - effective_date.year in
-    let months_diff = today.month - effective_date.month in
+    let years_diff = today_year - ed_year in
+    let months_diff = today_month - ed_month in
     years_diff * 12 + months_diff
   in
   
@@ -87,18 +92,18 @@ let calculate_campaign_emails context campaign_instance campaign_config =
   (* Get contacts for this campaign with targeting *)
   let contacts = 
     if campaign_config.target_all_contacts then
-      match Database_native.get_contacts_for_campaign campaign_instance with
+      match get_contacts_for_campaign campaign_instance with
       | Ok contacts -> contacts
       | Error _ -> []
     else
-      match Database_native.get_contact_campaigns_for_instance campaign_instance.id with
+      match get_contact_campaigns_for_instance campaign_instance.id with
       | Ok contact_campaigns ->
           (* Get the actual contact records for the contact_campaigns *)
-          List.filter_map (fun cc ->
+          List.filter_map (fun (cc : contact_campaign) ->
             try
-              match Database_native.get_all_contacts () with
-              | Ok all_contacts -> 
-                  List.find_opt (fun c -> c.id = cc.contact_id) all_contacts
+              match get_all_contacts () with
+              | Ok (contacts_from_db : contact list) -> 
+                  List.find_opt (fun (c : contact) -> c.id = cc.contact_id) contacts_from_db
               | Error _ -> None
             with _ -> None
           ) contact_campaigns
@@ -150,7 +155,7 @@ let calculate_campaign_emails context campaign_instance campaign_config =
                   current_date () (* Use today as trigger for "all contacts" campaigns *)
                 else
                   (* Get trigger date from contact_campaigns table *)
-                  match Database_native.get_contact_campaigns_for_instance campaign_instance.id with
+                  match get_contact_campaigns_for_instance campaign_instance.id with
                   | Ok contact_campaigns ->
                       (match List.find_opt (fun cc -> cc.contact_id = contact.id) contact_campaigns with
                        | Some cc -> 
@@ -182,7 +187,7 @@ let calculate_campaign_emails context campaign_instance campaign_config =
               false
           in
           
-          let (status, skip_reason) = 
+          let (status, _skip_reason) = 
             if should_skip then
               let reason = match check_exclusion_window contact scheduled_date with
                 | Excluded { reason; _ } -> reason
@@ -345,15 +350,15 @@ let calculate_all_campaign_schedules context =
   let all_schedules = ref [] in
   let errors = ref [] in
   
-  match Database_native.get_active_campaign_instances () with
+  match get_active_campaign_instances () with
   | Error err -> 
-      errors := (DatabaseError (Database_native.string_of_db_error err)) :: !errors;
+      errors := (DatabaseError (string_of_db_error err)) :: !errors;
       (!all_schedules, !errors)
   | Ok campaign_instances ->
       List.iter (fun campaign_instance ->
-        match Database_native.get_campaign_type_config campaign_instance.campaign_type with
+        match get_campaign_type_config campaign_instance.campaign_type with
         | Error err ->
-            errors := (DatabaseError (Database_native.string_of_db_error err)) :: !errors
+            errors := (DatabaseError (string_of_db_error err)) :: !errors
         | Ok campaign_config ->
             let campaign_schedules = calculate_campaign_emails context campaign_instance campaign_config in
             all_schedules := campaign_schedules @ !all_schedules
@@ -447,13 +452,13 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
         let all_schedules = raw_result.schedules @ campaign_schedules in
         
         (* Count campaign schedules for metrics *)
-        let campaign_scheduled = List.fold_left (fun acc schedule ->
+        let campaign_scheduled = List.fold_left (fun acc (schedule : email_schedule) ->
           match schedule.status with
           | PreScheduled -> acc + 1
           | _ -> acc
         ) 0 campaign_schedules in
         
-        let campaign_skipped = List.fold_left (fun acc schedule ->
+        let campaign_skipped = List.fold_left (fun acc (schedule : email_schedule) ->
           match schedule.status with
           | Skipped _ -> acc + 1
           | _ -> acc

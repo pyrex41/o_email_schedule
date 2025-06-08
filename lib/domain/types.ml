@@ -6,6 +6,7 @@ type state =
 type anniversary_email = 
   | Birthday
   | EffectiveDate
+  | AEP
   | PostWindow
 
 type campaign_email = {
@@ -39,8 +40,8 @@ type contact = {
   email: string;
   zip_code: string option;
   state: state option;
-  birthday: Simple_date.date option;
-  effective_date: Simple_date.date option;
+  birthday: Date_time.date option;
+  effective_date: Date_time.date option;
   carrier: string option; (* Insurance carrier code *)
   failed_underwriting: bool; (* Whether contact failed health questions *)
 }
@@ -48,8 +49,8 @@ type contact = {
 type email_schedule = {
   contact_id: int;
   email_type: email_type;
-  scheduled_date: Simple_date.date;
-  scheduled_time: Simple_date.time;
+  scheduled_date: Date_time.date;
+  scheduled_time: Date_time.time;
   status: schedule_status;
   priority: int;
   template_id: string option;
@@ -72,7 +73,15 @@ let string_of_state = function
 let string_of_anniversary_email = function
   | Birthday -> "birthday"
   | EffectiveDate -> "effective_date"
+  | AEP -> "aep"
   | PostWindow -> "post_window"
+
+let anniversary_email_of_string = function
+  | "birthday" -> Birthday
+  | "effective_date" -> EffectiveDate
+  | "aep" -> AEP
+  | "post_window" -> PostWindow
+  | s -> failwith ("Unknown anniversary email type: " ^ s)
 
 let string_of_followup_type = function
   | Cold -> "cold"
@@ -80,10 +89,45 @@ let string_of_followup_type = function
   | HQNoYes -> "hq_no_yes"
   | HQWithYes -> "hq_with_yes"
 
+let followup_type_of_string = function
+  | "cold" -> Cold
+  | "clicked_no_hq" -> ClickedNoHQ
+  | "hq_no_yes" -> HQNoYes
+  | "hq_with_yes" -> HQWithYes
+  | s -> failwith ("Unknown followup type: " ^ s)
+
 let string_of_email_type = function
   | Anniversary a -> string_of_anniversary_email a
   | Campaign c -> Printf.sprintf "campaign_%s_%d" c.campaign_type c.instance_id
   | Followup f -> Printf.sprintf "followup_%s" (string_of_followup_type f)
+
+let email_type_of_string str =
+  if String.length str >= 8 && String.sub str 0 8 = "campaign" then
+    (* Parse campaign emails: "campaign_type_instanceid" *)
+    let parts = String.split_on_char '_' str in
+    match parts with
+    | "campaign" :: campaign_type :: instance_id_str :: _ ->
+        let instance_id = int_of_string instance_id_str in
+        (* Default campaign values - in a real implementation these would be retrieved from DB *)
+        Campaign {
+          campaign_type;
+          instance_id;
+          respect_exclusions = true;
+          days_before_event = 30;
+          priority = 10;
+        }
+    | _ -> failwith ("Invalid campaign email type format: " ^ str)
+  else if String.length str >= 8 && String.sub str 0 8 = "followup" then
+    (* Parse followup emails: "followup_type" *)
+    let parts = String.split_on_char '_' str in
+    match parts with
+    | "followup" :: followup_parts ->
+        let followup_type_str = String.concat "_" followup_parts in
+        Followup (followup_type_of_string followup_type_str)
+    | _ -> failwith ("Invalid followup email type format: " ^ str)
+  else
+    (* Parse anniversary emails *)
+    Anniversary (anniversary_email_of_string str)
 
 let string_of_schedule_status = function
   | PreScheduled -> "pre-scheduled"
@@ -95,6 +139,7 @@ let string_of_schedule_status = function
 let priority_of_email_type = function
   | Anniversary Birthday -> 10
   | Anniversary EffectiveDate -> 20
+  | Anniversary AEP -> 30
   | Anniversary PostWindow -> 40
   | Campaign c -> c.priority
   | Followup _ -> 50
@@ -140,32 +185,32 @@ type campaign_instance = {
   instance_name: string;
   email_template: string option;
   sms_template: string option;
-  active_start_date: Simple_date.date option;
-  active_end_date: Simple_date.date option;
-  spread_start_date: Simple_date.date option;
-  spread_end_date: Simple_date.date option;
+  active_start_date: Date_time.date option;
+  active_end_date: Date_time.date option;
+  spread_start_date: Date_time.date option;
+  spread_end_date: Date_time.date option;
   target_states: string option;
   target_carriers: string option;
   metadata: string option;
-  created_at: Simple_date.datetime;
-  updated_at: Simple_date.datetime;
+  created_at: Date_time.datetime;
+  updated_at: Date_time.datetime;
 }
 
 type contact_campaign = {
   id: int;
   contact_id: int;
   campaign_instance_id: int;
-  trigger_date: Simple_date.date option;
+  trigger_date: Date_time.date option;
   status: string;
   metadata: string option;
-  created_at: Simple_date.datetime;
-  updated_at: Simple_date.datetime;
+  created_at: Date_time.datetime;
+  updated_at: Date_time.datetime;
 }
 
 (* Audit trail types *)
 type scheduler_checkpoint = {
   id: int;
-  run_timestamp: Simple_date.datetime;
+  run_timestamp: Date_time.datetime;
   scheduler_run_id: string;
   contacts_checksum: string;
   schedules_before_checksum: string option;
@@ -175,12 +220,12 @@ type scheduler_checkpoint = {
   emails_skipped: int option;
   status: string;
   error_message: string option;
-  completed_at: Simple_date.datetime option;
+  completed_at: Date_time.datetime option;
 }
 
 (* Load balancing types *)
 type daily_stats = {
-  date: Simple_date.date;
+  date: Date_time.date;
   total_count: int;
   ed_count: int;
   campaign_count: int;
