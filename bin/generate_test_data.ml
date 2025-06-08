@@ -342,11 +342,21 @@ let main () =
   | "generate" when argc >= 4 ->
       let db_name = Sys.argv.(2) in
       let count = int_of_string Sys.argv.(3) in
-      let batch_size = if argc >= 5 then int_of_string Sys.argv.(4) else 1000 in
+      
+      (* Check for --use-prepared flag in remaining arguments *)
       let use_prepared = 
-        argc >= 6 && Sys.argv.(5) = "--use-prepared" ||
-        argc >= 7 && Sys.argv.(6) = "--use-prepared"
+        let remaining_args = Array.sub Sys.argv 4 (argc - 4) in
+        Array.exists (fun arg -> arg = "--use-prepared") remaining_args
       in
+      
+      (* Parse batch_size from remaining non-flag arguments *)
+      let batch_size = 
+        if argc >= 5 && Sys.argv.(4) <> "--use-prepared" then
+          int_of_string Sys.argv.(4)
+        else
+          1000
+      in
+      
       generate_dataset db_name count batch_size use_prepared
   | "analyze" ->
       analyze_golden_dataset ()
