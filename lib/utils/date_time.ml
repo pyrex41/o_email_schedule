@@ -2,7 +2,7 @@ open Ptime
 
 (* Core types using Ptime *)
 type date = Ptime.date
-type time = Ptime.time  
+type time = (int * int * int) * int  (* ((hour, minute, second), tz_offset_s) *)
 type datetime = Ptime.t
 
 (* Smart constructors with validation *)
