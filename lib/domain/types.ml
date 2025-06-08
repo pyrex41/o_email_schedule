@@ -6,7 +6,6 @@ type state =
 type anniversary_email = 
   | Birthday
   | EffectiveDate
-  | AEP
   | PostWindow
 
 type campaign_email = {
@@ -42,6 +41,8 @@ type contact = {
   state: state option;
   birthday: Simple_date.date option;
   effective_date: Simple_date.date option;
+  carrier: string option; (* Insurance carrier code *)
+  failed_underwriting: bool; (* Whether contact failed health questions *)
 }
 
 type email_schedule = {
@@ -71,7 +72,6 @@ let string_of_state = function
 let string_of_anniversary_email = function
   | Birthday -> "birthday"
   | EffectiveDate -> "effective_date"
-  | AEP -> "aep"
   | PostWindow -> "post_window"
 
 let string_of_followup_type = function
@@ -95,7 +95,6 @@ let string_of_schedule_status = function
 let priority_of_email_type = function
   | Anniversary Birthday -> 10
   | Anniversary EffectiveDate -> 20
-  | Anniversary AEP -> 30
   | Anniversary PostWindow -> 40
   | Campaign c -> c.priority
   | Followup _ -> 50
@@ -131,6 +130,8 @@ type campaign_type_config = {
   target_all_contacts: bool;
   priority: int;
   active: bool;
+  spread_evenly: bool;
+  skip_failed_underwriting: bool;
 }
 
 type campaign_instance = {
@@ -141,7 +142,11 @@ type campaign_instance = {
   sms_template: string option;
   active_start_date: Simple_date.date option;
   active_end_date: Simple_date.date option;
-  metadata: string option; (* JSON string *)
+  spread_start_date: Simple_date.date option;
+  spread_end_date: Simple_date.date option;
+  target_states: string option;
+  target_carriers: string option;
+  metadata: string option;
   created_at: Simple_date.datetime;
   updated_at: Simple_date.datetime;
 }
@@ -152,7 +157,7 @@ type contact_campaign = {
   campaign_instance_id: int;
   trigger_date: Simple_date.date option;
   status: string;
-  metadata: string option; (* JSON string *)
+  metadata: string option;
   created_at: Simple_date.datetime;
   updated_at: Simple_date.datetime;
 }
@@ -199,4 +204,12 @@ type distribution_analysis = {
   max_day: int;
   min_day: int;
   distribution_variance: int;
+}
+
+(* Organization-level configuration for scheduling flexibility *)
+type organization_config = {
+  enable_post_window_emails: bool;
+  effective_date_first_email_months: int;
+  exclude_failed_underwriting_global: bool;
+  send_without_zipcode_for_universal: bool;
 }

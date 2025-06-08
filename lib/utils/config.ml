@@ -1,3 +1,5 @@
+open Types
+
 type t = {
   timezone: string;
   batch_size: int;
@@ -21,6 +23,9 @@ type t = {
   database_path: string;
   backup_dir: string;
   backup_retention_days: int;
+  
+  (* Organization-specific configuration *)
+  organization: organization_config;
 }
 
 let default = {
@@ -46,6 +51,14 @@ let default = {
   database_path = "org-206.sqlite3";
   backup_dir = "./backups";
   backup_retention_days = 7;
+  
+  (* Default organization configuration *)
+  organization = {
+    enable_post_window_emails = true; (* Default: enable post-window emails *)
+    effective_date_first_email_months = 11; (* Default: 11 months before first anniversary *)
+    exclude_failed_underwriting_global = false; (* Default: don't exclude failed underwriting globally *)
+    send_without_zipcode_for_universal = true; (* Default: send to contacts without zip for universal campaigns *)
+  };
 }
 
 (* Simplified config loading - just return default for now *)

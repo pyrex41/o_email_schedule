@@ -44,6 +44,43 @@ let is_valid_for_scheduling contact =
   | Ok c -> c.state <> None
   | Error _ -> false
 
+(* Enhanced validation for anniversary emails that considers organization config *)
+let is_valid_for_anniversary_scheduling org_config contact =
+  (* Basic email validation *)
+  if not (validate_email contact.email) then
+    false
+  else
+    (* For anniversary emails, we need location data unless org allows universal sending *)
+    match contact.zip_code, contact.state with
+    | None, None -> org_config.send_without_zipcode_for_universal
+    | Some zip, None -> 
+        (* Try to get state from zip *)
+        (match state_from_zip_code zip with
+         | Some _ -> true
+         | None -> org_config.send_without_zipcode_for_universal)
+    | _, Some _ -> true (* Has state, so valid *)
+
+(* Enhanced validation for campaigns that considers targeting and organization config *)
+let is_valid_for_campaign_scheduling org_config campaign_instance contact =
+  (* Basic email validation *)
+  if not (validate_email contact.email) then
+    false
+  else
+    (* Check if we need location data for this campaign *)
+    let requires_location = match (campaign_instance.target_states, campaign_instance.target_carriers) with
+      | (None, None) -> false (* Universal campaign *)
+      | (Some states, _) when states = "ALL" -> false (* Explicitly universal *)
+      | (_, Some carriers) when carriers = "ALL" -> false (* Explicitly universal *)
+      | _ -> true (* Has targeting constraints *)
+    in
+    
+    if requires_location then
+      (* Campaign has targeting - need valid location data *)
+      contact.zip_code <> None || contact.state <> None
+    else
+      (* Universal campaign - send even without zip code if org allows *)
+      org_config.send_without_zipcode_for_universal
+
 let is_zip_code_valid zip =
   Zip_data.ensure_loaded ();
   Zip_data.is_valid_zip_code zip

@@ -31,6 +31,37 @@ let get_db_connection () =
       with Sqlite3.Error msg ->
         Error (ConnectionError msg)
 
+(* Parse datetime from SQLite timestamp string *)
+let parse_datetime datetime_str =
+  if datetime_str = "" || datetime_str = "NULL" then
+    current_datetime ()
+  else
+    try
+      (* Handle common SQLite datetime formats: "YYYY-MM-DD HH:MM:SS" *)
+      match String.split_on_char ' ' datetime_str with
+      | [date_part; time_part] ->
+          let date = parse_date date_part in
+          let time_components = String.split_on_char ':' time_part in
+          (match time_components with
+           | [hour_str; minute_str; second_str] ->
+               let hour = int_of_string hour_str in
+               let minute = int_of_string minute_str in
+               (* Handle fractional seconds and short second strings safely *)
+               let second = 
+                 if String.length second_str >= 2 then
+                   int_of_string (String.sub second_str 0 2)
+                 else
+                   int_of_string second_str
+               in
+               make_datetime date (make_time hour minute second)
+           | _ -> current_datetime ())
+      | [date_part] ->
+          (* Date only, assume midnight *)
+          let date = parse_date date_part in
+          make_datetime date (make_time 0 0 0)
+      | _ -> current_datetime ()
+    with _ -> current_datetime ()
+
 (* Execute SQL with proper error handling *)
 let execute_sql_safe sql =
   match get_db_connection () with
@@ -106,9 +137,9 @@ let batch_insert_with_prepared_statement table_sql values_list =
           let _ = Sqlite3.exec db "ROLLBACK" in
           Error (SqliteError msg)
 
-(* Parse contact data from SQLite row *)
+(* Parse contact data from SQLite row with new fields *)
 let parse_contact_row = function
-  | [id_str; email; zip_code; state; birth_date; effective_date] ->
+  | [id_str; email; zip_code; state; birth_date; effective_date; carrier; failed_underwriting_str] ->
       (try
         let id = int_of_string id_str in
         let birthday = 
@@ -120,18 +151,48 @@ let parse_contact_row = function
           else Some (parse_date effective_date)
         in
         let state_opt = if state = "" || state = "NULL" then None else Some (state_of_string state) in
+        let zip_code_opt = if zip_code = "" || zip_code = "NULL" then None else Some zip_code in
+        let carrier_opt = if carrier = "" || carrier = "NULL" then None else Some carrier in
+        let failed_underwriting = (failed_underwriting_str = "1" || failed_underwriting_str = "true") in
         Some {
           id;
           email;
-          zip_code = Some zip_code;
+          zip_code = zip_code_opt;
           state = state_opt;
           birthday;
           effective_date = effective_date_opt;
+          carrier = carrier_opt;
+          failed_underwriting;
+        }
+      with _ -> None)
+  | [id_str; email; zip_code; state; birth_date; effective_date] ->
+      (* Backward compatibility for old schema without carrier/underwriting fields *)
+      (try
+        let id = int_of_string id_str in
+        let birthday = 
+          if birth_date = "" || birth_date = "NULL" then None
+          else Some (parse_date birth_date)
+        in
+        let effective_date_opt = 
+          if effective_date = "" || effective_date = "NULL" then None
+          else Some (parse_date effective_date)
+        in
+        let state_opt = if state = "" || state = "NULL" then None else Some (state_of_string state) in
+        let zip_code_opt = if zip_code = "" || zip_code = "NULL" then None else Some zip_code in
+        Some {
+          id;
+          email;
+          zip_code = zip_code_opt;
+          state = state_opt;
+          birthday;
+          effective_date = effective_date_opt;
+          carrier = None;
+          failed_underwriting = false;
         }
       with _ -> None)
   | _ -> None
 
-(* Query-driven contact fetching with native SQLite *)
+(* Query-driven contact fetching with native SQLite - updated for new fields *)
 let get_contacts_in_scheduling_window lookahead_days lookback_days =
   let today = current_date () in
   let active_window_end = add_days today lookahead_days in
@@ -141,15 +202,20 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
   let start_str = Printf.sprintf "%02d-%02d" lookback_window_start.month lookback_window_start.day in
   let end_str = Printf.sprintf "%02d-%02d" active_window_end.month active_window_end.day in
   
-  (* Fixed query that properly handles date ranges within the same year *)
+  (* Updated query to include new fields with fallback for old schema *)
   let query = 
     if lookback_window_start.month <= active_window_end.month then
       (* Window doesn't cross year boundary - simple case *)
       Printf.sprintf {|
-        SELECT id, email, zip_code, state, birth_date, effective_date
+        SELECT id, email, 
+               COALESCE(zip_code, '') as zip_code, 
+               COALESCE(state, '') as state, 
+               COALESCE(birth_date, '') as birth_date, 
+               COALESCE(effective_date, '') as effective_date,
+               COALESCE(carrier, '') as carrier,
+               COALESCE(failed_underwriting, 0) as failed_underwriting
         FROM contacts
         WHERE email IS NOT NULL AND email != '' 
-        AND zip_code IS NOT NULL AND zip_code != ''
         AND (
           (strftime('%%m-%%d', birth_date) BETWEEN '%s' AND '%s') OR
           (strftime('%%m-%%d', effective_date) BETWEEN '%s' AND '%s')
@@ -158,10 +224,15 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
     else
       (* Window crosses year boundary - need to handle two ranges *)
       Printf.sprintf {|
-        SELECT id, email, zip_code, state, birth_date, effective_date
+        SELECT id, email, 
+               COALESCE(zip_code, '') as zip_code, 
+               COALESCE(state, '') as state, 
+               COALESCE(birth_date, '') as birth_date, 
+               COALESCE(effective_date, '') as effective_date,
+               COALESCE(carrier, '') as carrier,
+               COALESCE(failed_underwriting, 0) as failed_underwriting
         FROM contacts
         WHERE email IS NOT NULL AND email != '' 
-        AND zip_code IS NOT NULL AND zip_code != ''
         AND (
           (strftime('%%m-%%d', birth_date) >= '%s' OR strftime('%%m-%%d', birth_date) <= '%s') OR
           (strftime('%%m-%%d', effective_date) >= '%s' OR strftime('%%m-%%d', effective_date) <= '%s')
@@ -175,13 +246,18 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
       let contacts = List.filter_map parse_contact_row rows in
       Ok contacts
 
-(* Get all contacts with native SQLite *)
+(* Get all contacts with native SQLite - updated for new fields *)
 let get_all_contacts () =
   let query = {|
-    SELECT id, email, zip_code, state, birth_date, effective_date
+    SELECT id, email, 
+           COALESCE(zip_code, '') as zip_code, 
+           COALESCE(state, '') as state, 
+           COALESCE(birth_date, '') as birth_date, 
+           COALESCE(effective_date, '') as effective_date,
+           COALESCE(carrier, '') as carrier,
+           COALESCE(failed_underwriting, 0) as failed_underwriting
     FROM contacts
     WHERE email IS NOT NULL AND email != '' 
-    AND zip_code IS NOT NULL AND zip_code != ''
     ORDER BY id
   |} in
   
@@ -785,68 +861,275 @@ let close_database () =
       ignore (Sqlite3.db_close db);
       db_handle := None 
 
-(* Load SQLite sessions extension for changeset support *)
-let enable_sessions_extension () =
-  match get_db_connection () with
-  | Error err -> Error err
-  | Ok db ->
-      try
-        (* First check if extension loading is enabled *)
-        match Sqlite3.exec db "PRAGMA load_extension=1" with
-        | Sqlite3.Rc.OK -> 
-            (* Try to load the sessions extension *)
-            (match Sqlite3.exec db "SELECT load_extension('sessions')" with
-             | Sqlite3.Rc.OK -> Ok ()
-             | rc -> Error (SqliteError ("Failed to load sessions extension: " ^ Sqlite3.Rc.to_string rc)))
-        | rc -> Error (SqliteError ("Failed to enable extension loading: " ^ Sqlite3.Rc.to_string rc))
-      with Sqlite3.Error msg ->
-        Error (SqliteError msg)
+(* Campaign database functions *)
 
-(* Apply a binary changeset file to the database *)
-let apply_changeset_file changeset_path =
-  match get_db_connection () with
-  | Error err -> Error err
-  | Ok db ->
-      if not (Sys.file_exists changeset_path) then
-        Error (SqliteError ("Changeset file not found: " ^ changeset_path))
-      else
-        try
-          (* Load sessions extension if not already loaded *)
-          (match enable_sessions_extension () with
-           | Error _ -> () (* Extension might already be loaded *)
-           | Ok () -> ());
-          
-          (* Read the changeset file as blob *)
-          let ic = open_in_bin changeset_path in
-          let changeset_size = in_channel_length ic in
-          let changeset_data = Bytes.create changeset_size in
-          really_input ic changeset_data 0 changeset_size;
-          close_in ic;
-          
-          (* Apply changeset using SQLite function *)
-          let apply_sql = Printf.sprintf "SELECT sqlite_changeset_apply(X'%s')" 
-            (String.concat "" (List.map (Printf.sprintf "%02x") 
-              (List.init changeset_size (fun i -> Char.code (Bytes.get changeset_data i))))) in
-          
-          match Sqlite3.exec db apply_sql with
-          | Sqlite3.Rc.OK -> Ok ()
-          | rc -> Error (SqliteError ("Failed to apply changeset: " ^ Sqlite3.Rc.to_string rc))
-        with 
-        | Sqlite3.Error msg -> Error (SqliteError msg)
-        | Sys_error msg -> Error (SqliteError ("File error: " ^ msg))
+(* Parse campaign_type_config from database row with new fields *)
+let parse_campaign_type_config_row = function
+  | [name; respect_exclusion_windows; enable_followups; days_before_event; target_all_contacts; priority; active; spread_evenly; skip_failed_underwriting] ->
+      (try
+        Some {
+          name;
+          respect_exclusion_windows = (respect_exclusion_windows = "1");
+          enable_followups = (enable_followups = "1");
+          days_before_event = int_of_string days_before_event;
+          target_all_contacts = (target_all_contacts = "1");
+          priority = int_of_string priority;
+          active = (active = "1");
+          spread_evenly = (spread_evenly = "1");
+          skip_failed_underwriting = (skip_failed_underwriting = "1");
+        }
+      with _ -> None)
+  | [name; respect_exclusion_windows; enable_followups; days_before_event; target_all_contacts; priority; active; spread_evenly] ->
+      (* Backward compatibility for old schema without skip_failed_underwriting *)
+      (try
+        Some {
+          name;
+          respect_exclusion_windows = (respect_exclusion_windows = "1");
+          enable_followups = (enable_followups = "1");
+          days_before_event = int_of_string days_before_event;
+          target_all_contacts = (target_all_contacts = "1");
+          priority = int_of_string priority;
+          active = (active = "1");
+          spread_evenly = (spread_evenly = "1");
+          skip_failed_underwriting = false;
+        }
+      with _ -> None)
+  | _ -> None
 
-(* Check if sessions extension is available *)
-let check_sessions_support () =
-  match get_db_connection () with
+(* Parse campaign_instance from database row with new fields *)
+let parse_campaign_instance_row = function
+  | [id_str; campaign_type; instance_name; email_template; sms_template; active_start_date; active_end_date; spread_start_date; spread_end_date; target_states; target_carriers; metadata; created_at; updated_at] ->
+      (try
+        let id = int_of_string id_str in
+        let active_start_date_opt = 
+          if active_start_date = "" || active_start_date = "NULL" then None
+          else Some (parse_date active_start_date)
+        in
+        let active_end_date_opt = 
+          if active_end_date = "" || active_end_date = "NULL" then None
+          else Some (parse_date active_end_date)
+        in
+        let spread_start_date_opt = 
+          if spread_start_date = "" || spread_start_date = "NULL" then None
+          else Some (parse_date spread_start_date)
+        in
+        let spread_end_date_opt = 
+          if spread_end_date = "" || spread_end_date = "NULL" then None
+          else Some (parse_date spread_end_date)
+        in
+        let email_template_opt = if email_template = "" || email_template = "NULL" then None else Some email_template in
+        let sms_template_opt = if sms_template = "" || sms_template = "NULL" then None else Some sms_template in
+        let target_states_opt = if target_states = "" || target_states = "NULL" then None else Some target_states in
+        let target_carriers_opt = if target_carriers = "" || target_carriers = "NULL" then None else Some target_carriers in
+        let metadata_opt = if metadata = "" || metadata = "NULL" then None else Some metadata in
+        Some {
+          id;
+          campaign_type;
+          instance_name;
+          email_template = email_template_opt;
+          sms_template = sms_template_opt;
+          active_start_date = active_start_date_opt;
+          active_end_date = active_end_date_opt;
+          spread_start_date = spread_start_date_opt;
+          spread_end_date = spread_end_date_opt;
+          target_states = target_states_opt;
+          target_carriers = target_carriers_opt;
+          metadata = metadata_opt;
+          created_at = parse_datetime created_at;
+          updated_at = parse_datetime updated_at;
+        }
+      with _ -> None)
+  | [id_str; campaign_type; instance_name; email_template; sms_template; active_start_date; active_end_date; spread_start_date; spread_end_date; metadata; created_at; updated_at] ->
+      (* Backward compatibility for old schema without targeting fields *)
+      (try
+        let id = int_of_string id_str in
+        let active_start_date_opt = 
+          if active_start_date = "" || active_start_date = "NULL" then None
+          else Some (parse_date active_start_date)
+        in
+        let active_end_date_opt = 
+          if active_end_date = "" || active_end_date = "NULL" then None
+          else Some (parse_date active_end_date)
+        in
+        let spread_start_date_opt = 
+          if spread_start_date = "" || spread_start_date = "NULL" then None
+          else Some (parse_date spread_start_date)
+        in
+        let spread_end_date_opt = 
+          if spread_end_date = "" || spread_end_date = "NULL" then None
+          else Some (parse_date spread_end_date)
+        in
+        let email_template_opt = if email_template = "" || email_template = "NULL" then None else Some email_template in
+        let sms_template_opt = if sms_template = "" || sms_template = "NULL" then None else Some sms_template in
+        let metadata_opt = if metadata = "" || metadata = "NULL" then None else Some metadata in
+        Some {
+          id;
+          campaign_type;
+          instance_name;
+          email_template = email_template_opt;
+          sms_template = sms_template_opt;
+          active_start_date = active_start_date_opt;
+          active_end_date = active_end_date_opt;
+          spread_start_date = spread_start_date_opt;
+          spread_end_date = spread_end_date_opt;
+          target_states = None;
+          target_carriers = None;
+          metadata = metadata_opt;
+          created_at = parse_datetime created_at;
+          updated_at = parse_datetime updated_at;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Parse contact_campaign from database row *)
+let parse_contact_campaign_row = function
+  | [id_str; contact_id_str; campaign_instance_id_str; trigger_date; status; metadata; created_at; updated_at] ->
+      (try
+        let id = int_of_string id_str in
+        let contact_id = int_of_string contact_id_str in
+        let campaign_instance_id = int_of_string campaign_instance_id_str in
+        let trigger_date_opt = 
+          if trigger_date = "" || trigger_date = "NULL" then None
+          else Some (parse_date trigger_date)
+        in
+        let metadata_opt = if metadata = "" || metadata = "NULL" then None else Some metadata in
+        Some {
+          id;
+          contact_id;
+          campaign_instance_id;
+          trigger_date = trigger_date_opt;
+          status;
+          metadata = metadata_opt;
+          created_at = parse_datetime created_at;
+          updated_at = parse_datetime updated_at;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Get active campaign instances for current date - updated for new fields *)
+let get_active_campaign_instances () =
+  let today = current_date () in
+  let today_str = string_of_date today in
+  
+  let query = Printf.sprintf {|
+    SELECT id, campaign_type, instance_name, 
+           COALESCE(email_template, '') as email_template, 
+           COALESCE(sms_template, '') as sms_template,
+           COALESCE(active_start_date, '') as active_start_date, 
+           COALESCE(active_end_date, '') as active_end_date, 
+           COALESCE(spread_start_date, '') as spread_start_date, 
+           COALESCE(spread_end_date, '') as spread_end_date,
+           COALESCE(target_states, '') as target_states,
+           COALESCE(target_carriers, '') as target_carriers,
+           COALESCE(metadata, '') as metadata, 
+           created_at, updated_at
+    FROM campaign_instances
+    WHERE (active_start_date IS NULL OR active_start_date <= '%s')
+    AND (active_end_date IS NULL OR active_end_date >= '%s')
+    ORDER BY id
+  |} today_str today_str in
+  
+  match execute_sql_safe query with
   | Error err -> Error err
-  | Ok db ->
-      try
-        (* Try to call a sessions function *)
-        match Sqlite3.exec db "SELECT sqlite_version()" with
-        | Sqlite3.Rc.OK -> 
-            (* Check if we can enable extension loading *)
-            (match Sqlite3.exec db "PRAGMA compile_options" with
-             | Sqlite3.Rc.OK -> Ok true
-             | _ -> Ok false)
-        | _ -> Ok false
-      with Sqlite3.Error _ -> Ok false 
+  | Ok rows ->
+      let instances = List.filter_map parse_campaign_instance_row rows in
+      Ok instances
+
+(* Get campaign type configuration - updated for new fields *)
+let get_campaign_type_config campaign_type_name =
+  let query = Printf.sprintf {|
+    SELECT name, 
+           COALESCE(respect_exclusion_windows, 1) as respect_exclusion_windows, 
+           COALESCE(enable_followups, 1) as enable_followups, 
+           COALESCE(days_before_event, 0) as days_before_event,
+           COALESCE(target_all_contacts, 0) as target_all_contacts, 
+           COALESCE(priority, 10) as priority, 
+           COALESCE(active, 1) as active, 
+           COALESCE(spread_evenly, 0) as spread_evenly,
+           COALESCE(skip_failed_underwriting, 0) as skip_failed_underwriting
+    FROM campaign_types
+    WHERE name = '%s' AND COALESCE(active, 1) = 1
+  |} campaign_type_name in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok [row] ->
+      (match parse_campaign_type_config_row row with
+       | Some config -> Ok config
+       | None -> Error (ParseError "Invalid campaign type config"))
+  | Ok [] -> Error (ParseError "Campaign type not found")
+  | Ok _ -> Error (ParseError "Multiple campaign types found")
+
+(* Get contact campaigns for a specific campaign instance *)
+let get_contact_campaigns_for_instance campaign_instance_id =
+  let query = Printf.sprintf {|
+    SELECT id, contact_id, campaign_instance_id, trigger_date, status, metadata, created_at, updated_at
+    FROM contact_campaigns
+    WHERE campaign_instance_id = %d
+    AND status = 'pending'
+    ORDER BY contact_id
+  |} campaign_instance_id in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let contact_campaigns = List.filter_map parse_contact_campaign_row rows in
+      Ok contact_campaigns
+
+(* Get all contacts for "target_all_contacts" campaigns *)
+let get_all_contacts_for_campaign () =
+  let query = {|
+    SELECT id, email, zip_code, state, birth_date, effective_date
+    FROM contacts
+    WHERE email IS NOT NULL AND email != '' 
+    AND zip_code IS NOT NULL AND zip_code != ''
+    ORDER BY id
+  |} in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let contacts = List.filter_map parse_contact_row rows in
+      Ok contacts 
+
+(* Helper function to parse state/carrier targeting strings *)
+let parse_targeting_list targeting_str =
+  if targeting_str = "" || targeting_str = "NULL" || targeting_str = "ALL" then
+    `All
+  else
+    let items = String.split_on_char ',' targeting_str |> List.map String.trim in
+    `Specific items
+
+(* Check if contact matches campaign targeting criteria *)
+let contact_matches_targeting contact campaign_instance =
+  let state_matches = match campaign_instance.target_states with
+    | None -> true
+    | Some target_states ->
+        (match parse_targeting_list target_states with
+         | `All -> true
+         | `Specific states ->
+             (match contact.state with
+              | None -> false
+              | Some contact_state -> List.mem (string_of_state contact_state) states))
+  in
+  
+  let carrier_matches = match campaign_instance.target_carriers with
+    | None -> true
+    | Some target_carriers ->
+        (match parse_targeting_list target_carriers with
+         | `All -> true
+         | `Specific carriers ->
+             (match contact.carrier with
+              | None -> false
+              | Some contact_carrier -> List.mem contact_carrier carriers))
+  in
+  
+  state_matches && carrier_matches
+
+(* Get all contacts for campaign with targeting filters *)
+let get_contacts_for_campaign campaign_instance =
+  match get_all_contacts () with
+  | Error err -> Error err
+  | Ok all_contacts ->
+      let filtered_contacts = List.filter (contact_matches_targeting ~campaign_instance) all_contacts in
+      Ok filtered_contacts
