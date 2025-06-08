@@ -1,0 +1,128 @@
+```mermaid
+graph TB
+    %% External Systems
+    CLI[Scheduler CLI]
+    DB[(SQLite Database)]
+    Config[Configuration Files]
+    
+    %% Main System Components
+    subgraph "Email Scheduler System"
+        direction TB
+        
+        %% Entry Point
+        MainScheduler[Main Scheduler<br/>schedule_emails_streaming]
+        
+        %% Context Setup
+        Context[Scheduling Context<br/>create_context<br/>- Run ID<br/>- Load Balancing Config<br/>- Start Time]
+        
+        %% Core Processing Modules
+        subgraph "Contact Processing"
+            ContactLoader[Contact Loader<br/>get_all_contacts]
+            ContactBatch[Contact Batch Processor<br/>process_contact_batch]
+            ContactValid[Contact Validator<br/>is_valid_for_scheduling]
+        end
+        
+        subgraph "Anniversary Scheduling"
+            AnniversaryCalc[Anniversary Calculator<br/>calculate_anniversary_emails<br/>- Birthday emails<br/>- Effective Date emails]
+            DateCalc[Date Calculator<br/>next_anniversary<br/>add_days]
+            PostWindow[Post-Window Calculator<br/>calculate_post_window_emails]
+        end
+        
+        subgraph "Campaign Scheduling"
+            CampaignLoader[Campaign Loader<br/>get_active_campaign_instances]
+            CampaignCalc[Campaign Calculator<br/>calculate_campaign_emails<br/>- Target filtering<br/>- Spread distribution]
+            CampaignValid[Campaign Validator<br/>is_contact_valid_for_campaign]
+        end
+        
+        subgraph "Business Rules Engine"
+            ExclusionEngine[Exclusion Engine<br/>check_exclusion_window<br/>should_skip_email]
+            StateRules[State Rules<br/>- Birthday windows<br/>- Effective Date windows<br/>- Year-round exclusions]
+            OrgRules[Organization Rules<br/>- Failed underwriting<br/>- Minimum time thresholds]
+        end
+        
+        subgraph "Load Balancing"
+            LoadBalancer[Load Balancer<br/>distribute_schedules]
+            EDSmoother[ED Smoother<br/>smooth_effective_dates]
+            CapEnforcer[Cap Enforcer<br/>enforce_daily_caps]
+            JitterEngine[Jitter Engine<br/>apply_jitter]
+        end
+        
+        %% Output Processing
+        ResultAggregator[Result Aggregator<br/>batch_result]
+        DBWriter[Database Writer<br/>Smart Updates]
+        
+    end
+    
+    %% External Data Sources
+    Contacts[(Contacts Table)]
+    Campaigns[(Campaign Tables)]
+    Schedules[(Email Schedules Table)]
+    
+    %% Flow Connections
+    CLI --> MainScheduler
+    Config --> MainScheduler
+    MainScheduler --> Context
+    Context --> ContactLoader
+    Context --> CampaignLoader
+    
+    %% Contact Flow
+    ContactLoader --> DB
+    DB --> Contacts
+    Contacts --> ContactBatch
+    ContactBatch --> ContactValid
+    ContactValid --> AnniversaryCalc
+    ContactValid --> CampaignCalc
+    
+    %% Anniversary Flow
+    AnniversaryCalc --> DateCalc
+    AnniversaryCalc --> ExclusionEngine
+    DateCalc --> PostWindow
+    
+    %% Campaign Flow
+    CampaignLoader --> DB
+    DB --> Campaigns
+    Campaigns --> CampaignCalc
+    CampaignCalc --> CampaignValid
+    CampaignValid --> ExclusionEngine
+    
+    %% Business Rules Flow
+    ExclusionEngine --> StateRules
+    ExclusionEngine --> OrgRules
+    StateRules --> ResultAggregator
+    OrgRules --> ResultAggregator
+    
+    %% Load Balancing Flow
+    ResultAggregator --> LoadBalancer
+    LoadBalancer --> EDSmoother
+    EDSmoother --> CapEnforcer
+    CapEnforcer --> JitterEngine
+    JitterEngine --> DBWriter
+    
+    %% Database Output
+    DBWriter --> DB
+    DB --> Schedules
+    
+    %% Status and Email Types
+    subgraph "Email Types & Status"
+        EmailTypes[Email Types<br/>• Anniversary Birthday<br/>• Anniversary EffectiveDate<br/>• Anniversary AEP<br/>• Anniversary PostWindow<br/>• Campaign Instance<br/>• Followup]
+        
+        StatusTypes[Schedule Status<br/>• PreScheduled<br/>• Skipped + Reason<br/>• Scheduled<br/>• Processing<br/>• Sent]
+    end
+    
+    %% Key Business Metrics
+    subgraph "Business Metrics"
+        Metrics[Scheduling Metrics<br/>• Contacts Processed<br/>• Emails Scheduled<br/>• Emails Skipped<br/>• Distribution Analysis<br/>• Error Counts]
+    end
+    
+    ResultAggregator --> Metrics
+    
+    %% Styling
+    classDef primaryFlow fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef businessRule fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef dataStore fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef processing fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    
+    class MainScheduler,Context,ResultAggregator primaryFlow
+    class ExclusionEngine,StateRules,OrgRules businessRule
+    class DB,Contacts,Campaigns,Schedules dataStore
+    class ContactBatch,AnniversaryCalc,CampaignCalc,LoadBalancer processing

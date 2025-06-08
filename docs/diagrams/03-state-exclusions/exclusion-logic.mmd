@@ -1,0 +1,129 @@
+```mermaid
+flowchart TD
+    Start([Email Exclusion Check]) --> GetInputs[Get Inputs<br/>- Contact record<br/>- Email type<br/>- Scheduled date]
+    
+    GetInputs --> InitialCheck[should_skip_email<br/>Main Decision Function]
+    
+    InitialCheck --> CheckEmailType{Check Email Type}
+    
+    %% Campaign Bypass Branch
+    CheckEmailType -->|Campaign Email| CheckRespectExclusions{Campaign<br/>respect_exclusions?}
+    CheckRespectExclusions -->|No| BypassExclusions[Bypass All Exclusions<br/>Return: false - don't skip]
+    CheckRespectExclusions -->|Yes| StandardExclusionCheck[Apply Standard Exclusion Logic]
+    
+    %% Post-Window Bypass Branch
+    CheckEmailType -->|Anniversary PostWindow| BypassExclusions
+    
+    %% Standard Anniversary Emails
+    CheckEmailType -->|Anniversary Birthday<br/>Anniversary EffectiveDate<br/>Anniversary AEP| StandardExclusionCheck
+    
+    %% Followup Emails
+    CheckEmailType -->|Followup Email| StandardExclusionCheck
+    
+    StandardExclusionCheck --> ExclusionWindowCheck[check_exclusion_window<br/>Core Exclusion Logic]
+    
+    subgraph "Exclusion Window Evaluation"
+        ExclusionWindowCheck --> YearRoundCheck[check_year_round_exclusion<br/>Permanent State Exclusions]
+        
+        YearRoundCheck --> HasState{Contact has<br/>valid state?}
+        HasState -->|No| NotExcludedYR[Return: NotExcluded]
+        HasState -->|Yes| IsYearRound{State configured<br/>for year-round exclusion?}
+        
+        IsYearRound -->|Yes| ExcludedYR[Return: Excluded<br/>reason: Year-round exclusion for STATE<br/>window_end: None]
+        IsYearRound -->|No| BirthdayCheck[check_birthday_exclusion<br/>Birthday Window Check]
+        
+        BirthdayCheck --> HasBirthday{Contact has<br/>birthday AND state?}
+        HasBirthday -->|No| NotExcludedBD[Continue to ED Check]
+        HasBirthday -->|Yes| GetBirthdayWindow[get_window_for_email_type<br/>state + Anniversary Birthday]
+        
+        GetBirthdayWindow --> HasBirthdayWindow{Birthday window<br/>configured for state?}
+        HasBirthdayWindow -->|No| NotExcludedBD
+        HasBirthdayWindow -->|Yes| CalcNextBirthday[Calculate Next Birthday<br/>next_anniversary check_date birthday]
+        
+        CalcNextBirthday --> InBirthdayWindow[Check if date in window<br/>in_exclusion_window]
+        InBirthdayWindow --> BirthdayInWindow{Date falls within<br/>birthday exclusion window?}
+        
+        BirthdayInWindow -->|No| NotExcludedBD
+        BirthdayInWindow -->|Yes| CalcBirthdayEnd[Calculate Window End<br/>add_days next_birthday after_days]
+        CalcBirthdayEnd --> ExcludedBD[Return: Excluded<br/>reason: Birthday exclusion window for STATE<br/>window_end: calculated_end_date]
+        
+        NotExcludedBD --> EDCheck[check_effective_date_exclusion<br/>Effective Date Window Check]
+        
+        EDCheck --> HasEffectiveDate{Contact has<br/>effective_date AND state?}
+        HasEffectiveDate -->|No| NotExcludedED[Return: NotExcluded]
+        HasEffectiveDate -->|Yes| GetEDWindow[get_window_for_email_type<br/>state + Anniversary EffectiveDate]
+        
+        GetEDWindow --> HasEDWindow{ED window<br/>configured for state?}
+        HasEDWindow -->|No| NotExcludedED
+        HasEDWindow -->|Yes| CalcNextED[Calculate Next Effective Date<br/>next_anniversary check_date effective_date]
+        
+        CalcNextED --> InEDWindow[Check if date in window<br/>in_exclusion_window]
+        InEDWindow --> EDInWindow{Date falls within<br/>ED exclusion window?}
+        
+        EDInWindow -->|No| NotExcludedED
+        EDInWindow -->|Yes| CalcEDEnd[Calculate Window End<br/>add_days next_ed after_days]
+        CalcEDEnd --> ExcludedED[Return: Excluded<br/>reason: Effective date exclusion window for STATE<br/>window_end: calculated_end_date]
+    end
+    
+    %% Final Results Processing
+    NotExcludedYR --> FinalNotExcluded[Final Result: NotExcluded<br/>Return: false - don't skip email]
+    NotExcludedBD --> FinalNotExcluded
+    NotExcludedED --> FinalNotExcluded
+    
+    ExcludedYR --> FinalExcluded[Final Result: Excluded<br/>Return: true - skip email]
+    ExcludedBD --> FinalExcluded
+    ExcludedED --> FinalExcluded
+    
+    BypassExclusions --> AllowEmail[Email Allowed<br/>Bypass all exclusions]
+    FinalNotExcluded --> AllowEmail
+    FinalExcluded --> SkipEmail[Email Skipped<br/>Create schedule with Skipped status]
+    
+    %% Post-Window Recovery Logic
+    subgraph "Post-Window Recovery System"
+        PostWindowCalc[get_post_window_date<br/>Calculate Recovery Date]
+        PostWindowCalc --> CheckCurrentExclusions[Check All Current Exclusions<br/>Birthday + Effective Date]
+        
+        CheckCurrentExclusions --> FindLatestWindow[Find Latest Window End Date<br/>Compare all active exclusions]
+        FindLatestWindow --> HasWindowEnd{Any active<br/>exclusion windows?}
+        
+        HasWindowEnd -->|No| NoPostWindow[Return: None<br/>No recovery needed]
+        HasWindowEnd -->|Yes| CalcPostDate[Calculate Post-Window Date<br/>add_days latest_end_date 1]
+        CalcPostDate --> ReturnPostDate[Return: Some post_date<br/>Recovery email date]
+    end
+    
+    SkipEmail --> PostWindowEnabled{Organization enables<br/>post-window emails?}
+    PostWindowEnabled -->|Yes| PostWindowCalc
+    PostWindowEnabled -->|No| FinalSkip[Final Skip<br/>No recovery email]
+    
+    NoPostWindow --> FinalSkip
+    ReturnPostDate --> ScheduleRecovery[Schedule Post-Window Email<br/>Anniversary PostWindow type]
+    
+    AllowEmail --> End([Email Processing Complete])
+    FinalSkip --> End
+    ScheduleRecovery --> End
+    
+    %% Window Configuration Details
+    subgraph "Window Configuration Logic"
+        WindowConfig[Exclusion Window Structure<br/>- before_days: int<br/>- after_days: int<br/>- year_round: bool<br/>- special_rules: string option]
+        
+        WindowLogic[Window Evaluation Logic<br/>in_exclusion_window<br/>- Calculate window start: anniversary - before_days<br/>- Calculate window end: anniversary + after_days<br/>- Check if check_date falls within range]
+        
+        SpecialRules[Special State Rules<br/>- Nevada: Month-start modifications<br/>- Custom business logic per state<br/>- Override behaviors]
+    end
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef exclusionCheck fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef calculation fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef result fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef bypass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef skip fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    
+    class Start,End startEnd
+    class CheckEmailType,CheckRespectExclusions,HasState,IsYearRound,HasBirthday decision
+    class YearRoundCheck,BirthdayCheck,EDCheck,ExclusionWindowCheck exclusionCheck
+    class CalcNextBirthday,CalcNextED,CalcBirthdayEnd,CalcEDEnd,CalcPostDate calculation
+    class ExcludedYR,ExcludedBD,ExcludedED,FinalExcluded result
+    class BypassExclusions,AllowEmail bypass
+    class SkipEmail,FinalSkip skip

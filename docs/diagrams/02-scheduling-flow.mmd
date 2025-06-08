@@ -1,0 +1,141 @@
+```mermaid
+flowchart TD
+    Start([Scheduler Start]) --> LoadConfig[Load Configuration<br/>- Organization settings<br/>- Send time preferences<br/>- Batch size]
+    
+    LoadConfig --> CreateContext[Create Scheduling Context<br/>generate_run_id<br/>create_context]
+    
+    CreateContext --> LoadContacts[Load All Contacts<br/>get_all_contacts]
+    
+    LoadContacts --> CampaignPhase{Process Campaigns First}
+    
+    %% Campaign Processing Branch
+    CampaignPhase -->|Yes| LoadCampaigns[Load Active Campaigns<br/>get_active_campaign_instances]
+    LoadCampaigns --> ProcessCampaigns[Process Each Campaign<br/>calculate_campaign_emails]
+    
+    subgraph "Campaign Processing Details"
+        ProcessCampaigns --> GetCampaignConfig[Get Campaign Configuration<br/>get_campaign_type_config]
+        GetCampaignConfig --> FilterContacts[Filter Contacts for Campaign<br/>- Target states/carriers<br/>- Contact campaigns table]
+        FilterContacts --> ValidateContact[Validate Contact<br/>is_contact_valid_for_scheduling]
+        ValidateContact --> CheckOrgExclusion[Check Organization Exclusions<br/>should_exclude_contact<br/>- Failed underwriting rules<br/>- AEP exception handling]
+        CheckOrgExclusion -->|Excluded| SkipCampaign[Mark as Skipped<br/>Create schedule with Skipped status]
+        CheckOrgExclusion -->|Valid| CalcCampaignDate[Calculate Send Date<br/>- Spread evenly logic<br/>- Days before event<br/>- Trigger date handling]
+        CalcCampaignDate --> CheckCampaignExclusion{Respect Exclusions?}
+        CheckCampaignExclusion -->|Yes| EvaluateExclusion[Evaluate Exclusion Windows<br/>should_skip_email]
+        CheckCampaignExclusion -->|No| MarkCampaignScheduled[Mark as PreScheduled]
+        EvaluateExclusion -->|Skip| SkipCampaign
+        EvaluateExclusion -->|Allow| MarkCampaignScheduled
+        SkipCampaign --> CampaignResults[Collect Campaign Schedules]
+        MarkCampaignScheduled --> CampaignResults
+    end
+    
+    CampaignResults --> ContactPhase[Begin Contact Processing<br/>Anniversary Emails]
+    
+    %% Contact Processing Branch  
+    CampaignPhase -->|Skip to Anniversary| ContactPhase
+    ContactPhase --> ChunkContacts[Divide into Batches<br/>chunk_size from config]
+    
+    ChunkContacts --> ProcessBatch[Process Contact Batch<br/>process_contact_batch]
+    
+    subgraph "Anniversary Processing Details"
+        ProcessBatch --> ValidateAnniversary[Validate for Anniversary<br/>is_valid_for_anniversary_scheduling]
+        ValidateAnniversary -->|Invalid| SkipContact[Skip Contact<br/>Add to errors]
+        ValidateAnniversary -->|Valid| CalcAnniversaries[Calculate Anniversary Emails<br/>calculate_anniversary_emails]
+        
+        CalcAnniversaries --> CheckFailedUnderwriting{Failed Underwriting<br/>Global Exclusion?}
+        CheckFailedUnderwriting -->|Yes| SkipAllAnniversary[Skip All Anniversary Emails]
+        CheckFailedUnderwriting -->|No| ProcessBirthday[Process Birthday Email]
+        
+        ProcessBirthday --> HasBirthday{Has Birthday?}
+        HasBirthday -->|Yes| CalcBirthdayDate[Calculate Birthday Send Date<br/>next_anniversary + days_before]
+        HasBirthday -->|No| ProcessEffectiveDate[Process Effective Date Email]
+        
+        CalcBirthdayDate --> CheckBirthdayExclusion[Check Birthday Exclusion<br/>should_skip_email]
+        CheckBirthdayExclusion -->|Skip| SkipBirthday[Mark Birthday as Skipped<br/>Include exclusion reason]
+        CheckBirthdayExclusion -->|Allow| ScheduleBirthday[Mark Birthday as PreScheduled]
+        
+        SkipBirthday --> ProcessEffectiveDate
+        ScheduleBirthday --> ProcessEffectiveDate
+        
+        ProcessEffectiveDate --> HasEffectiveDate{Has Effective Date?}
+        HasEffectiveDate -->|Yes| CheckMinTime[Check Minimum Time Threshold<br/>should_send_effective_date_email]
+        HasEffectiveDate -->|No| ProcessPostWindow[Process Post-Window Emails]
+        
+        CheckMinTime -->|Too Soon| ProcessPostWindow
+        CheckMinTime -->|Valid| CalcEDDate[Calculate ED Send Date<br/>next_anniversary + days_before]
+        
+        CalcEDDate --> CheckEDExclusion[Check ED Exclusion<br/>should_skip_email]
+        CheckEDExclusion -->|Skip| SkipED[Mark ED as Skipped<br/>Include exclusion reason]
+        CheckEDExclusion -->|Allow| ScheduleED[Mark ED as PreScheduled]
+        
+        SkipED --> ProcessPostWindow
+        ScheduleED --> ProcessPostWindow
+        
+        ProcessPostWindow --> PostWindowEnabled{Post-Window<br/>Emails Enabled?}
+        PostWindowEnabled -->|Yes| CalcPostWindow[Calculate Post-Window<br/>get_post_window_date]
+        PostWindowEnabled -->|No| CollectSchedules[Collect All Schedules]
+        
+        CalcPostWindow --> HasPostWindow{Has Post-Window<br/>Date?}
+        HasPostWindow -->|Yes| SchedulePostWindow[Schedule Post-Window Email]
+        HasPostWindow -->|No| CollectSchedules
+        
+        SchedulePostWindow --> CollectSchedules
+        SkipAllAnniversary --> CollectSchedules
+        SkipContact --> BatchMetrics[Update Batch Metrics<br/>- Contacts processed<br/>- Emails scheduled<br/>- Emails skipped<br/>- Errors]
+        CollectSchedules --> BatchMetrics
+    end
+    
+    BatchMetrics --> MoreBatches{More Contact<br/>Batches?}
+    MoreBatches -->|Yes| ProcessBatch
+    MoreBatches -->|No| CombineResults[Combine Anniversary + Campaign Results]
+    
+    CombineResults --> LoadBalancing[Apply Load Balancing<br/>distribute_schedules]
+    
+    subgraph "Load Balancing Pipeline"
+        LoadBalancing --> SmoothED[Smooth Effective Dates<br/>smooth_effective_dates<br/>- Group by date<br/>- Check ED soft limits<br/>- Apply jitter redistribution]
+        
+        SmoothED --> EnforceCaps[Enforce Daily Caps<br/>enforce_daily_caps<br/>- Check overage thresholds<br/>- Redistribute excess emails<br/>- Preserve priority ordering]
+        
+        EnforceCaps --> CatchUpDistribution[Catch-up Distribution<br/>distribute_catch_up<br/>- Spread overflow emails<br/>- Use modulo distribution]
+    end
+    
+    CatchUpDistribution --> FinalResults[Generate Final Results<br/>- Update metrics<br/>- Prepare database updates]
+    
+    FinalResults --> DBUpdate[Database Smart Update<br/>- Compare existing schedules<br/>- Preserve run IDs<br/>- Handle content changes]
+    
+    DBUpdate --> Summary[Generate Summary<br/>get_scheduling_summary<br/>- Distribution analysis<br/>- Performance metrics]
+    
+    Summary --> End([Scheduling Complete])
+    
+    %% Error Handling Flow
+    SkipContact --> ErrorHandling[Error Collection<br/>- Invalid contact data<br/>- Date calculation errors<br/>- Unexpected exceptions]
+    ErrorHandling --> ContinueProcessing[Continue with Next Contact]
+    ContinueProcessing --> BatchMetrics
+    
+    %% State Machine for Schedule Status
+    subgraph "Schedule Status State Machine"
+        PreScheduledState[PreScheduled<br/>Initial state for valid emails]
+        SkippedState[Skipped + Reason<br/>- Exclusion window<br/>- Failed validation<br/>- Organization rules]
+        ScheduledState[Scheduled<br/>Final state after load balancing]
+        ProcessingState[Processing<br/>Email being sent]
+        SentState[Sent<br/>Email delivered]
+        
+        PreScheduledState --> ScheduledState
+        SkippedState --> PostWindowState[Post-Window<br/>Scheduled for later]
+        ScheduledState --> ProcessingState
+        ProcessingState --> SentState
+    end
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef process fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef validation fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef error fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef database fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    
+    class Start,End startEnd
+    class LoadConfig,CreateContext,LoadContacts,ProcessCampaigns,ProcessBatch,LoadBalancing process
+    class CampaignPhase,CheckOrgExclusion,CheckCampaignExclusion,HasBirthday,HasEffectiveDate decision
+    class ValidateContact,ValidateAnniversary,CheckFailedUnderwriting validation
+    class SkipContact,ErrorHandling error
+    class DBUpdate,Summary database
