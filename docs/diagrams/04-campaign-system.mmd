@@ -1,0 +1,156 @@
+```mermaid
+flowchart TD
+    Start([Campaign Processing Start]) --> LoadActiveCampaigns[Load Active Campaign Instances<br/>get_active_campaign_instances]
+    
+    LoadActiveCampaigns --> HasCampaigns{Active campaigns<br/>found?}
+    HasCampaigns -->|No| NoCampaigns[No Campaign Schedules<br/>Return empty list]
+    HasCampaigns -->|Yes| ProcessEachCampaign[Process Each Campaign Instance<br/>calculate_campaign_emails]
+    
+    ProcessEachCampaign --> GetCampaignConfig[Get Campaign Type Configuration<br/>get_campaign_type_config]
+    
+    subgraph "Campaign Configuration"
+        GetCampaignConfig --> CampaignSettings[Campaign Type Settings<br/>- name: string<br/>- respect_exclusion_windows: bool<br/>- enable_followups: bool<br/>- days_before_event: int<br/>- target_all_contacts: bool<br/>- priority: int<br/>- active: bool<br/>- spread_evenly: bool<br/>- skip_failed_underwriting: bool]
+    end
+    
+    CampaignSettings --> GetTargetContacts[Determine Target Contacts<br/>Based on campaign configuration]
+    
+    GetTargetContacts --> TargetStrategy{Campaign<br/>target_all_contacts?}
+    
+    %% Target All Contacts Branch
+    TargetStrategy -->|Yes| LoadAllContacts[Load All Contacts<br/>get_contacts_for_campaign<br/>Apply targeting filters]
+    
+    LoadAllContacts --> ApplyTargeting[Apply Campaign Targeting<br/>- target_states filter<br/>- target_carriers filter<br/>- Handle "ALL" as universal]
+    
+    %% Specific Contact List Branch
+    TargetStrategy -->|No| LoadContactCampaigns[Load Contact Campaigns<br/>get_contact_campaigns_for_instance<br/>Pre-defined contact list]
+    
+    LoadContactCampaigns --> ResolveContacts[Resolve Contact Records<br/>Map contact_campaign.contact_id<br/>to actual contact records]
+    
+    ResolveContacts --> MergeTargets[Merge Contact Lists]
+    ApplyTargeting --> MergeTargets
+    
+    MergeTargets --> ProcessEachContact[Process Each Target Contact]
+    
+    subgraph "Contact Validation & Exclusion"
+        ProcessEachContact --> ValidateForCampaign[Validate Contact for Campaign<br/>is_contact_valid_for_scheduling]
+        
+        ValidateForCampaign --> CheckBasicRequirements{Basic Requirements Met?<br/>- Valid email address<br/>- Location data if needed}
+        CheckBasicRequirements -->|No| SkipInvalidContact[Skip Contact<br/>Invalid data]
+        
+        CheckBasicRequirements -->|Yes| CheckOrgExclusions[Check Organization Exclusions<br/>should_exclude_contact]
+        
+        CheckOrgExclusions --> CheckFailedUnderwriting{Contact has<br/>failed underwriting?}
+        CheckFailedUnderwriting -->|No| ProceedWithScheduling[Proceed with Scheduling]
+        
+        CheckFailedUnderwriting -->|Yes| CheckGlobalExclusion{Global failed<br/>underwriting exclusion?}
+        CheckGlobalExclusion -->|Yes| CheckAEPException{Campaign is AEP?}
+        CheckAEPException -->|Yes| ProceedWithScheduling
+        CheckAEPException -->|No| SkipFailedUnderwriting[Skip Contact<br/>Failed underwriting - global exclusion]
+        
+        CheckGlobalExclusion -->|No| CheckCampaignExclusion{Campaign skips<br/>failed underwriting?}
+        CheckCampaignExclusion -->|Yes| SkipCampaignUnderwriting[Skip Contact<br/>Failed underwriting - campaign exclusion]
+        CheckCampaignExclusion -->|No| ProceedWithScheduling
+    end
+    
+    subgraph "Schedule Date Calculation"
+        ProceedWithScheduling --> CalculateScheduleDate[Calculate Schedule Date]
+        
+        CalculateScheduleDate --> SpreadStrategy{Campaign<br/>spread_evenly?}
+        
+        %% Spread Evenly Branch
+        SpreadStrategy -->|Yes| CheckSpreadDates{Spread dates<br/>configured?}
+        CheckSpreadDates -->|Yes| CalculateSpreadDate[Calculate Spread Date<br/>calculate_spread_date<br/>- Use contact_id as seed<br/>- Deterministic distribution<br/>- Even spread across date range]
+        CheckSpreadDates -->|No| UseDefaultDate[Use Default Date Calculation<br/>current_date + days_before_event]
+        
+        %% Regular Scheduling Branch
+        SpreadStrategy -->|No| GetTriggerDate[Get Trigger Date]
+        GetTriggerDate --> TriggerSource{Trigger source?}
+        
+        TriggerSource -->|All Contacts| UseTodayTrigger[Use Today as Trigger<br/>current_date]
+        TriggerSource -->|Contact Campaign| GetStoredTrigger[Get Stored Trigger Date<br/>contact_campaigns.trigger_date]
+        
+        GetStoredTrigger --> HasStoredTrigger{Trigger date<br/>available?}
+        HasStoredTrigger -->|Yes| UseStoredTrigger[Use Stored Trigger Date]
+        HasStoredTrigger -->|No| UseTodayTrigger
+        
+        UseTodayTrigger --> CalculateFromTrigger[Calculate Schedule Date<br/>trigger_date + days_before_event]
+        UseStoredTrigger --> CalculateFromTrigger
+        CalculateSpreadDate --> MergeScheduleDates[Merge Schedule Date Calculations]
+        UseDefaultDate --> MergeScheduleDates
+        CalculateFromTrigger --> MergeScheduleDates
+    end
+    
+    subgraph "Final Schedule Creation"
+        MergeScheduleDates --> CreateCampaignEmail[Create Campaign Email Type<br/>- campaign_type<br/>- instance_id<br/>- respect_exclusions<br/>- days_before_event<br/>- priority]
+        
+        CreateCampaignEmail --> CheckExclusionRespect{Campaign respects<br/>exclusion windows?}
+        
+        CheckExclusionRespect -->|No| MarkAsPreScheduled[Mark as PreScheduled<br/>Bypass exclusion checks]
+        CheckExclusionRespect -->|Yes| EvaluateExclusionWindows[Evaluate Exclusion Windows<br/>should_skip_email]
+        
+        EvaluateExclusionWindows --> ExclusionResult{Exclusion<br/>result?}
+        ExclusionResult -->|NotExcluded| MarkAsPreScheduled
+        ExclusionResult -->|Excluded| MarkAsSkipped[Mark as Skipped<br/>Include exclusion reason]
+        
+        MarkAsPreScheduled --> CreateScheduleRecord[Create Email Schedule Record<br/>- contact_id<br/>- email_type: Campaign<br/>- scheduled_date<br/>- scheduled_time<br/>- status: PreScheduled<br/>- template_id<br/>- campaign_instance_id<br/>- scheduler_run_id]
+        
+        MarkAsSkipped --> CreateSkippedRecord[Create Skipped Schedule Record<br/>- status: Skipped + reason<br/>- All other fields same]
+    end
+    
+    CreateScheduleRecord --> CollectSchedules[Collect Campaign Schedules]
+    CreateSkippedRecord --> CollectSchedules
+    SkipInvalidContact --> CollectSchedules
+    SkipFailedUnderwriting --> CollectSchedules
+    SkipCampaignUnderwriting --> CollectSchedules
+    
+    CollectSchedules --> MoreContacts{More contacts<br/>for campaign?}
+    MoreContacts -->|Yes| ProcessEachContact
+    MoreContacts -->|No| MoreCampaigns{More campaign<br/>instances?}
+    
+    MoreCampaigns -->|Yes| ProcessEachCampaign
+    MoreCampaigns -->|No| CombineAllCampaigns[Combine All Campaign Schedules]
+    
+    CombineAllCampaigns --> CalculateMetrics[Calculate Campaign Metrics<br/>- Total campaigns processed<br/>- Schedules created<br/>- Contacts skipped<br/>- Exclusion breakdown]
+    
+    CalculateMetrics --> NoCampaigns
+    NoCampaigns --> End([Campaign Processing Complete])
+    
+    %% Campaign Instance Data Model
+    subgraph "Campaign Instance Model"
+        CampaignInstance[Campaign Instance<br/>- id: int<br/>- campaign_type: string<br/>- instance_name: string<br/>- email_template: string option<br/>- sms_template: string option<br/>- active_start_date: date option<br/>- active_end_date: date option<br/>- spread_start_date: date option<br/>- spread_end_date: date option<br/>- target_states: string option<br/>- target_carriers: string option<br/>- metadata: string option]
+    end
+    
+    %% Contact Campaign Model
+    subgraph "Contact Campaign Model"
+        ContactCampaign[Contact Campaign<br/>- id: int<br/>- contact_id: int<br/>- campaign_instance_id: int<br/>- trigger_date: date option<br/>- status: string<br/>- metadata: string option]
+    end
+    
+    %% Error Handling
+    subgraph "Error Handling"
+        DatabaseError[Database Errors<br/>- Campaign loading failures<br/>- Contact retrieval errors<br/>- Configuration access issues]
+        
+        ValidationError[Validation Errors<br/>- Invalid campaign configuration<br/>- Missing required fields<br/>- Date calculation failures]
+        
+        ErrorCollection[Error Collection<br/>Collect errors but continue processing<br/>other campaigns]
+    end
+    
+    GetCampaignConfig -->|Error| ErrorCollection
+    LoadAllContacts -->|Error| ErrorCollection
+    LoadContactCampaigns -->|Error| ErrorCollection
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef process fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef validation fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef calculation fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    classDef skip fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef success fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    
+    class Start,End startEnd
+    class LoadActiveCampaigns,GetCampaignConfig,GetTargetContacts,ProcessEachContact process
+    class HasCampaigns,TargetStrategy,CheckBasicRequirements,SpreadStrategy decision
+    class ValidateForCampaign,CheckOrgExclusions,CheckFailedUnderwriting validation
+    class CalculateScheduleDate,CalculateSpreadDate,CreateCampaignEmail calculation
+    class SkipInvalidContact,SkipFailedUnderwriting,MarkAsSkipped skip
+    class MarkAsPreScheduled,CreateScheduleRecord success

@@ -1,0 +1,187 @@
+```mermaid
+flowchart TD
+    Start([Date Calculation Start]) --> DateType{Date Calculation Type}
+    
+    %% Anniversary Date Calculation
+    DateType -->|Anniversary Calculation| AnniversaryCalc[Anniversary Date Calculation<br/>next_anniversary function]
+    
+    subgraph "Next Anniversary Calculation"
+        AnniversaryCalc --> GetInputs[Get Inputs<br/>- reference_date: current or check date<br/>- anniversary_date: birthday or effective_date]
+        
+        GetInputs --> ExtractComponents[Extract Date Components<br/>reference_date: (ref_year, ref_month, ref_day)<br/>anniversary_date: (ann_year, ann_month, ann_day)]
+        
+        ExtractComponents --> CalculateThisYear[Calculate This Year Anniversary<br/>this_year_anniversary = (ref_year, ann_month, ann_day)]
+        
+        CalculateThisYear --> CheckLeapYear{Is anniversary<br/>Feb 29th?}
+        CheckLeapYear -->|No| RegularAnniversary[Regular Anniversary Date]
+        CheckLeapYear -->|Yes| LeapYearLogic[Leap Year Logic<br/>Handle Feb 29th special case]
+        
+        subgraph "Leap Year Handling"
+            LeapYearLogic --> IsRefYearLeap{Is reference year<br/>a leap year?}
+            IsRefYearLeap -->|Yes| UseFeb29[Use Feb 29th<br/>this_year_anniversary = (ref_year, 2, 29)]
+            IsRefYearLeap -->|No| UseFeb28[Use Feb 28th<br/>this_year_anniversary = (ref_year, 2, 28)]
+        end
+        
+        RegularAnniversary --> CompareWithRef[Compare with Reference Date]
+        UseFeb29 --> CompareWithRef
+        UseFeb28 --> CompareWithRef
+        
+        CompareWithRef --> DateComparison{this_year_anniversary<br/>vs reference_date?}
+        DateComparison -->|Future or Same| UseThisYear[Use This Year<br/>Return this_year_anniversary]
+        DateComparison -->|Past| UseNextYear[Use Next Year<br/>next_year_anniversary = (ref_year + 1, ann_month, ann_day)]
+        
+        UseNextYear --> CheckNextYearLeap{Next year leap year<br/>and anniversary Feb 29?}
+        CheckNextYearLeap -->|Yes| UseNextFeb29[Use Feb 29th Next Year]
+        CheckNextYearLeap -->|No| UseRegularNext[Use Regular Date Next Year]
+        
+        UseThisYear --> AnniversaryResult[Anniversary Date Result]
+        UseNextFeb29 --> AnniversaryResult
+        UseRegularNext --> AnniversaryResult
+    end
+    
+    %% Schedule Date Calculation
+    DateType -->|Schedule Date Calculation| ScheduleCalc[Schedule Date Calculation<br/>Based on email type and timing]
+    
+    subgraph "Schedule Date Logic"
+        ScheduleCalc --> EmailTypeCheck{Email Type}
+        
+        %% Birthday Schedule
+        EmailTypeCheck -->|Birthday Anniversary| BirthdaySchedule[Birthday Schedule Calculation]
+        BirthdaySchedule --> GetNextBirthday[Get Next Birthday<br/>next_anniversary(today, birthday)]
+        GetNextBirthday --> ApplyBirthdayOffset[Apply Days Before Offset<br/>birthday_send_date = next_birthday - config.birthday_days_before]
+        
+        %% Effective Date Schedule
+        EmailTypeCheck -->|Effective Date Anniversary| EDSchedule[Effective Date Schedule Calculation]
+        EDSchedule --> CheckEDThreshold[Check Minimum Time Threshold<br/>should_send_effective_date_email]
+        
+        subgraph "ED Threshold Check"
+            CheckEDThreshold --> CalcMonthsSince[Calculate Months Since ED<br/>months_since = (today_year - ed_year) * 12 + (today_month - ed_month)]
+            CalcMonthsSince --> CompareThreshold{months_since >=<br/>org.effective_date_first_email_months?}
+            CompareThreshold -->|No| SkipEDEmail[Skip ED Email<br/>Too soon after policy inception]
+            CompareThreshold -->|Yes| ProceedWithED[Proceed with ED Calculation]
+        end
+        
+        ProceedWithED --> GetNextED[Get Next Effective Date<br/>next_anniversary(today, effective_date)]
+        GetNextED --> ApplyEDOffset[Apply Days Before Offset<br/>ed_send_date = next_ed - config.effective_date_days_before]
+        
+        %% Campaign Schedule
+        EmailTypeCheck -->|Campaign Email| CampaignSchedule[Campaign Schedule Calculation]
+        CampaignSchedule --> CampaignStrategy{Campaign Strategy}
+        
+        CampaignStrategy -->|Spread Evenly| SpreadCalculation[Spread Calculation<br/>calculate_spread_date]
+        CampaignStrategy -->|Regular Timing| RegularCampaignCalc[Regular Campaign Calculation]
+        
+        subgraph "Spread Date Calculation"
+            SpreadCalculation --> GetSpreadParams[Get Spread Parameters<br/>- contact_id: deterministic seed<br/>- spread_start_date<br/>- spread_end_date]
+            
+            GetSpreadParams --> CalcSpreadRange[Calculate Spread Range<br/>total_days = diff_days(end_date, start_date) + 1]
+            
+            CalcSpreadRange --> ApplySpreadHash[Apply Deterministic Hash<br/>hash_value = contact_id mod total_days]
+            
+            ApplySpreadHash --> GetSpreadDate[Get Spread Date<br/>spread_date = start_date + hash_value]
+        end
+        
+        subgraph "Regular Campaign Calculation"
+            RegularCampaignCalc --> GetTriggerDate[Get Trigger Date<br/>From contact_campaigns or today]
+            GetTriggerDate --> ApplyCampaignOffset[Apply Campaign Offset<br/>schedule_date = trigger_date + days_before_event]
+        end
+        
+        %% Post-Window Schedule
+        EmailTypeCheck -->|Post-Window Recovery| PostWindowSchedule[Post-Window Schedule Calculation<br/>get_post_window_date]
+        
+        subgraph "Post-Window Date Calculation"
+            PostWindowSchedule --> CheckActiveExclusions[Check Active Exclusions<br/>Evaluate current exclusion windows]
+            
+            CheckActiveExclusions --> GetExclusionWindows[Get All Exclusion Windows<br/>- Birthday exclusion<br/>- Effective date exclusion]
+            
+            GetExclusionWindows --> FindLatestEnd[Find Latest Window End<br/>Compare all window_end dates]
+            
+            FindLatestEnd --> HasActiveWindow{Any active<br/>exclusion windows?}
+            HasActiveWindow -->|No| NoRecoveryNeeded[No Recovery Needed<br/>Return None]
+            HasActiveWindow -->|Yes| CalcRecoveryDate[Calculate Recovery Date<br/>latest_end_date + 1 day buffer]
+        end
+    end
+    
+    %% Common Date Operations
+    subgraph "Date Utility Functions"
+        DateUtils[Date Utility Functions]
+        
+        AddDays[add_days function<br/>- Handle month/year boundaries<br/>- Account for leap years<br/>- Validate result dates]
+        
+        DiffDays[diff_days function<br/>- Calculate days between dates<br/>- Handle leap year differences<br/>- Return absolute difference]
+        
+        CompareDates[compare_date function<br/>- Chronological comparison<br/>- Return -1, 0, or 1<br/>- Handle edge cases]
+        
+        CurrentDate[current_date function<br/>- Get system current date<br/>- Timezone considerations<br/>- Consistent format]
+        
+        ScheduleTime[schedule_time_ct function<br/>- Convert to Central Time<br/>- Apply hour/minute config<br/>- Handle time zone transitions]
+    end
+    
+    %% Results and Validation
+    ApplyBirthdayOffset --> ValidateScheduleDate[Validate Schedule Date<br/>Ensure not in past]
+    ApplyEDOffset --> ValidateScheduleDate
+    GetSpreadDate --> ValidateScheduleDate
+    ApplyCampaignOffset --> ValidateScheduleDate
+    CalcRecoveryDate --> ValidateScheduleDate
+    SkipEDEmail --> NoScheduleDate[No Schedule Date<br/>Email not scheduled]
+    NoRecoveryNeeded --> NoScheduleDate
+    
+    ValidateScheduleDate --> DateValidation{Date >= today?}
+    DateValidation -->|Yes| ValidScheduleDate[Valid Schedule Date<br/>Return calculated date]
+    DateValidation -->|No| AdjustToToday[Adjust to Today<br/>Minimum date = today]
+    
+    AdjustToToday --> ValidScheduleDate
+    ValidScheduleDate --> End([Date Calculation Complete])
+    NoScheduleDate --> End
+    
+    %% Edge Cases and Special Handling
+    subgraph "Edge Cases & Special Rules"
+        EdgeCases[Edge Cases Handling]
+        
+        LeapYearEdges[Leap Year Edge Cases<br/>- Feb 29th anniversaries<br/>- Year transitions<br/>- Leap to non-leap years]
+        
+        MonthBoundaries[Month Boundary Cases<br/>- End of month dates<br/>- Variable month lengths<br/>- Feb 28/29 handling]
+        
+        TimeZoneHandling[Time Zone Handling<br/>- Central Time conversion<br/>- Daylight saving transitions<br/>- Consistent time application]
+        
+        NevadaSpecial[Nevada Special Rules<br/>- Month-start modifications<br/>- Enhanced compliance logic<br/>- State-specific adjustments]
+    end
+    
+    %% Date Validation Rules
+    subgraph "Date Validation Rules"
+        ValidationRules[Validation Rules]
+        
+        PastDateCheck[Past Date Check<br/>- No scheduling in past<br/>- Minimum date = today<br/>- Handle timezone differences]
+        
+        FutureLimits[Future Date Limits<br/>- Reasonable scheduling horizon<br/>- Business rule constraints<br/>- System capacity limits]
+        
+        BusinessDays[Business Day Considerations<br/>- Weekend handling (future feature)<br/>- Holiday handling (future feature)<br/>- Business hour alignment]
+    end
+    
+    %% Configuration Dependencies
+    subgraph "Configuration Dependencies"
+        ConfigDeps[Configuration Dependencies]
+        
+        TimingConfig[Timing Configuration<br/>- birthday_days_before<br/>- effective_date_days_before<br/>- send_time_hour/minute<br/>- effective_date_first_email_months]
+        
+        OrgConfig[Organization Configuration<br/>- Time zone settings<br/>- Business rules<br/>- Minimum thresholds]
+        
+        CampaignConfig[Campaign Configuration<br/>- days_before_event<br/>- spread_evenly settings<br/>- Date range specifications]
+    end
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef calculation fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef validation fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef utility fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef special fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef result fill:#fff8e1,stroke:#f9a825,stroke-width:2px
+    
+    class Start,End startEnd
+    class AnniversaryCalc,ScheduleCalc,BirthdaySchedule,EDSchedule,CampaignSchedule calculation
+    class DateType,CheckLeapYear,DateComparison,CompareThreshold,CampaignStrategy decision
+    class ValidateScheduleDate,CheckEDThreshold,DateValidation validation
+    class AddDays,DiffDays,CompareDates,CurrentDate,ScheduleTime utility
+    class LeapYearLogic,PostWindowSchedule,NevadaSpecial special
+    class ValidScheduleDate,NoScheduleDate,AnniversaryResult result

@@ -1,0 +1,249 @@
+```mermaid
+flowchart TD
+    Start([Error Occurrence]) --> ErrorType{Error Type Classification}
+    
+    %% Database Errors
+    ErrorType -->|Database Operation| DatabaseError[Database Error<br/>DatabaseError of string]
+    
+    subgraph "Database Error Handling"
+        DatabaseError --> DBErrorType{Database Error Type}
+        
+        DBErrorType -->|Connection Failed| DBConnection[Connection Error<br/>- SQLite file access<br/>- Permission issues<br/>- File corruption]
+        
+        DBErrorType -->|Query Failed| DBQuery[Query Error<br/>- SQL syntax issues<br/>- Table not found<br/>- Constraint violations]
+        
+        DBErrorType -->|Transaction Failed| DBTransaction[Transaction Error<br/>- Concurrent access<br/>- Lock timeout<br/>- Rollback needed]
+        
+        DBConnection --> DBRetryLogic{Retry Possible?}
+        DBQuery --> DBValidation[Validate Query<br/>Check SQL syntax<br/>Verify table structure]
+        DBTransaction --> DBRollback[Rollback Transaction<br/>Restore consistent state]
+        
+        DBRetryLogic -->|Yes| DBRetryAttempt[Retry Database Operation<br/>With exponential backoff]
+        DBRetryLogic -->|No| DBFatalError[Fatal Database Error<br/>Cannot continue processing]
+        
+        DBRetryAttempt --> DBRetrySuccess{Retry Successful?}
+        DBRetrySuccess -->|Yes| DBRecovered[Database Operation Recovered]
+        DBRetrySuccess -->|No| DBFatalError
+        
+        DBValidation --> DBRepair[Attempt Query Repair<br/>Use fallback queries]
+        DBRollback --> DBConsistency[Check Database Consistency]
+        DBRepair --> DBFallback[Fallback Operation<br/>Continue with limited functionality]
+        DBConsistency --> DBRecovered
+    end
+    
+    %% Invalid Contact Data Errors
+    ErrorType -->|Invalid Contact| InvalidContactError[Invalid Contact Data Error<br/>InvalidContactData { contact_id; reason }]
+    
+    subgraph "Contact Data Error Handling"
+        InvalidContactError --> ContactErrorType{Contact Error Type}
+        
+        ContactErrorType -->|Missing Required Fields| MissingFields[Missing Required Fields<br/>- email address<br/>- state information<br/>- date fields]
+        
+        ContactErrorType -->|Invalid Data Format| InvalidFormat[Invalid Data Format<br/>- malformed email<br/>- invalid dates<br/>- bad state codes]
+        
+        ContactErrorType -->|Business Rule Violation| BusinessViolation[Business Rule Violation<br/>- failed validation<br/>- constraint conflicts<br/>- policy violations]
+        
+        MissingFields --> ContactSkip[Skip Contact<br/>Add to error collection<br/>Continue with next contact]
+        
+        InvalidFormat --> ContactSanitize[Attempt Data Sanitization<br/>Clean and validate data]
+        
+        BusinessViolation --> ContactExclusion[Apply Contact Exclusion<br/>Mark as skipped with reason]
+        
+        ContactSanitize --> SanitizeSuccess{Sanitization<br/>Successful?}
+        SanitizeSuccess -->|Yes| ContactRecovered[Contact Data Recovered]
+        SanitizeSuccess -->|No| ContactSkip
+        
+        ContactSkip --> ContactErrorLogging[Log Contact Error<br/>Include contact_id and reason<br/>For debugging and audit]
+        ContactExclusion --> ContactErrorLogging
+        ContactRecovered --> ContactContinue[Continue Contact Processing]
+    end
+    
+    %% Configuration Errors
+    ErrorType -->|Configuration Issue| ConfigError[Configuration Error<br/>ConfigurationError of string]
+    
+    subgraph "Configuration Error Handling"
+        ConfigError --> ConfigErrorType{Configuration Error Type}
+        
+        ConfigErrorType -->|Missing Config File| MissingConfig[Missing Configuration<br/>- File not found<br/>- Environment variables missing<br/>- Default values needed]
+        
+        ConfigErrorType -->|Invalid Config Values| InvalidConfig[Invalid Configuration<br/>- Out of range values<br/>- Type mismatches<br/>- Constraint violations]
+        
+        ConfigErrorType -->|Inconsistent Config| InconsistentConfig[Inconsistent Configuration<br/>- Conflicting settings<br/>- Business rule violations<br/>- Logic errors]
+        
+        MissingConfig --> UseDefaults[Use Default Values<br/>Apply safe default configuration<br/>Log warning messages]
+        
+        InvalidConfig --> ConfigValidation[Validate and Correct<br/>Apply bounds checking<br/>Use fallback values]
+        
+        InconsistentConfig --> ConfigResolution[Resolve Conflicts<br/>Apply precedence rules<br/>Use conservative settings]
+        
+        UseDefaults --> ConfigRecovered[Configuration Recovered<br/>Continue with defaults]
+        ConfigValidation --> ConfigRecovered
+        ConfigResolution --> ConfigRecovered
+        
+        ConfigRecovered --> ConfigWarning[Log Configuration Warning<br/>Document fallback usage<br/>Recommend fixes]
+    end
+    
+    %% Validation Errors
+    ErrorType -->|Validation Failed| ValidationError[Validation Error<br/>ValidationError of string]
+    
+    subgraph "Validation Error Handling"
+        ValidationError --> ValidationContext{Validation Context}
+        
+        ValidationContext -->|Email Schedule| ScheduleValidation[Schedule Validation Error<br/>- Invalid email types<br/>- Bad date combinations<br/>- Template issues]
+        
+        ValidationContext -->|Campaign Settings| CampaignValidation[Campaign Validation Error<br/>- Invalid targeting<br/>- Date range issues<br/>- Configuration conflicts]
+        
+        ValidationContext -->|Business Rules| RuleValidation[Business Rule Validation<br/>- Policy violations<br/>- Constraint failures<br/>- Logic errors]
+        
+        ScheduleValidation --> ScheduleFix[Attempt Schedule Fix<br/>Correct invalid values<br/>Apply safe defaults]
+        
+        CampaignValidation --> CampaignSkip[Skip Invalid Campaign<br/>Continue with other campaigns<br/>Log detailed error]
+        
+        RuleValidation --> RuleOverride[Apply Rule Override<br/>Use conservative approach<br/>Document exception]
+        
+        ScheduleFix --> FixSuccess{Fix Successful?}
+        FixSuccess -->|Yes| ValidationRecovered[Validation Recovered]
+        FixSuccess -->|No| ValidationSkip[Skip Invalid Item]
+        
+        CampaignSkip --> ValidationLogging[Log Validation Error<br/>Include context and details]
+        RuleOverride --> ValidationLogging
+        ValidationSkip --> ValidationLogging
+        ValidationRecovered --> ValidationContinue[Continue Processing]
+    end
+    
+    %% Date Calculation Errors
+    ErrorType -->|Date Calculation| DateError[Date Calculation Error<br/>DateCalculationError of string]
+    
+    subgraph "Date Calculation Error Handling"
+        DateError --> DateErrorType{Date Error Type}
+        
+        DateErrorType -->|Arithmetic Overflow| DateOverflow[Date Arithmetic Overflow<br/>- Year out of range<br/>- Invalid calculations<br/>- Leap year issues]
+        
+        DateErrorType -->|Invalid Input Dates| InvalidDates[Invalid Input Dates<br/>- Malformed date strings<br/>- Impossible dates<br/>- Missing date components]
+        
+        DateErrorType -->|Business Logic Error| DateLogicError[Date Logic Error<br/>- Conflicting constraints<br/>- Invalid date ranges<br/>- Timezone issues]
+        
+        DateOverflow --> DateFallback[Use Date Fallback<br/>Apply reasonable defaults<br/>Use current date + offset]
+        
+        InvalidDates --> DateParsing[Attempt Date Parsing<br/>Try multiple formats<br/>Extract valid components]
+        
+        DateLogicError --> DateCorrection[Apply Date Correction<br/>Resolve logic conflicts<br/>Use conservative approach]
+        
+        DateFallback --> DateRecovered[Date Calculation Recovered]
+        DateParsing --> ParseSuccess{Parsing Successful?}
+        ParseSuccess -->|Yes| DateRecovered
+        ParseSuccess -->|No| DateSkip[Skip Date-dependent Operation]
+        DateCorrection --> DateRecovered
+        
+        DateSkip --> DateErrorLogging[Log Date Error<br/>Include input values<br/>For debugging]
+    end
+    
+    %% Load Balancing Errors
+    ErrorType -->|Load Balancing| LoadBalancingError[Load Balancing Error<br/>LoadBalancingError of string]
+    
+    subgraph "Load Balancing Error Handling"
+        LoadBalancingError --> LoadBalancingType{Load Balancing Error Type}
+        
+        LoadBalancingType -->|Jitter Calculation| JitterError[Jitter Calculation Error<br/>- Algorithm failure<br/>- Invalid parameters<br/>- Overflow conditions]
+        
+        LoadBalancingType -->|Distribution Failure| DistributionError[Distribution Error<br/>- Capacity overflow<br/>- Invalid constraints<br/>- Logic failures]
+        
+        LoadBalancingType -->|Configuration Issue| LoadConfigError[Load Balancing Config Error<br/>- Invalid thresholds<br/>- Inconsistent settings<br/>- Missing parameters]
+        
+        JitterError --> KeepOriginalDates[Keep Original Dates<br/>Skip jitter application<br/>Log jitter failure]
+        
+        DistributionError --> BasicDistribution[Apply Basic Distribution<br/>Use simple algorithms<br/>Ensure email delivery]
+        
+        LoadConfigError --> DefaultLoadConfig[Use Default Load Config<br/>Apply conservative limits<br/>Ensure system stability]
+        
+        KeepOriginalDates --> LoadBalancingRecovered[Load Balancing Recovered<br/>Continue with original schedule]
+        BasicDistribution --> LoadBalancingRecovered
+        DefaultLoadConfig --> LoadBalancingRecovered
+    end
+    
+    %% Unexpected Errors
+    ErrorType -->|Unexpected Exception| UnexpectedError[Unexpected Error<br/>UnexpectedError of exn]
+    
+    subgraph "Unexpected Error Handling"
+        UnexpectedError --> ExceptionType{Exception Type}
+        
+        ExceptionType -->|System Exception| SystemException[System Exception<br/>- Out of memory<br/>- Stack overflow<br/>- System resource issues]
+        
+        ExceptionType -->|Runtime Exception| RuntimeException[Runtime Exception<br/>- Division by zero<br/>- Array bounds<br/>- Type conversion errors]
+        
+        ExceptionType -->|External Library Error| LibraryException[Library Exception<br/>- External dependency failure<br/>- API call errors<br/>- Third-party issues]
+        
+        SystemException --> SystemShutdown[Graceful System Shutdown<br/>Save current state<br/>Log critical error]
+        
+        RuntimeException --> RuntimeRecovery[Runtime Recovery<br/>Skip current operation<br/>Continue with next item]
+        
+        LibraryException --> LibraryFallback[Library Fallback<br/>Use alternative approach<br/>Disable dependent features]
+        
+        SystemShutdown --> CriticalErrorLogging[Log Critical Error<br/>Include full stack trace<br/>Save system state]
+        RuntimeRecovery --> UnexpectedLogging[Log Unexpected Error<br/>Include context information]
+        LibraryFallback --> UnexpectedLogging
+    end
+    
+    %% Error Recovery and Continuation
+    DBRecovered --> ContinueProcessing[Continue Processing<br/>Resume normal operations]
+    ContactContinue --> ContinueProcessing
+    ValidationContinue --> ContinueProcessing
+    DateRecovered --> ContinueProcessing
+    LoadBalancingRecovered --> ContinueProcessing
+    
+    ConfigWarning --> ContinueProcessing
+    ContactErrorLogging --> ContinueProcessing
+    ValidationLogging --> ContinueProcessing
+    DateErrorLogging --> ContinueProcessing
+    UnexpectedLogging --> ContinueProcessing
+    
+    DBFatalError --> TerminateProcessing[Terminate Processing<br/>Cannot continue safely]
+    CriticalErrorLogging --> TerminateProcessing
+    
+    ContinueProcessing --> End([Error Handling Complete<br/>Processing Continues])
+    TerminateProcessing --> FatalEnd([Fatal Error<br/>Processing Terminated])
+    
+    %% Error Reporting and Monitoring
+    subgraph "Error Reporting & Monitoring"
+        ErrorReporting[Error Reporting System]
+        
+        ErrorCollection[Error Collection<br/>- Aggregate all errors<br/>- Categorize by type<br/>- Track error counts]
+        
+        ErrorLogging[Error Logging<br/>- Structured log messages<br/>- Contextual information<br/>- Stack traces when available]
+        
+        ErrorMetrics[Error Metrics<br/>- Error rates by type<br/>- System health indicators<br/>- Performance impact tracking]
+        
+        ErrorAlerts[Error Alerts<br/>- Critical error notifications<br/>- Threshold-based alerts<br/>- Escalation procedures]
+        
+        ErrorAnalysis[Error Analysis<br/>- Pattern detection<br/>- Root cause analysis<br/>- Trend identification]
+    end
+    
+    %% Error Recovery Strategies
+    subgraph "Error Recovery Strategies"
+        RecoveryStrategies[Recovery Strategies]
+        
+        GracefulDegradation[Graceful Degradation<br/>- Reduced functionality<br/>- Safe operation modes<br/>- User experience preservation]
+        
+        RetryMechanisms[Retry Mechanisms<br/>- Exponential backoff<br/>- Circuit breakers<br/>- Failure detection]
+        
+        FallbackSystems[Fallback Systems<br/>- Alternative approaches<br/>- Backup procedures<br/>- Manual overrides]
+        
+        StatePreservation[State Preservation<br/>- Save progress<br/>- Maintain consistency<br/>- Recovery checkpoints]
+    end
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef errorType fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef recovery fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef logging fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef fatal fill:#ff5722,stroke:#bf360c,stroke-width:3px
+    classDef continue fill:#4caf50,stroke:#1b5e20,stroke-width:2px
+    
+    class Start,End,FatalEnd startEnd
+    class DatabaseError,InvalidContactError,ConfigError,ValidationError,DateError,LoadBalancingError,UnexpectedError errorType
+    class DBRecovered,ContactRecovered,ConfigRecovered,ValidationRecovered,DateRecovered,LoadBalancingRecovered recovery
+    class ErrorType,DBErrorType,ContactErrorType,ConfigErrorType decision
+    class ErrorCollection,ErrorLogging,ContactErrorLogging,ValidationLogging,DateErrorLogging,UnexpectedLogging,CriticalErrorLogging logging
+    class DBFatalError,SystemShutdown,TerminateProcessing fatal
+    class ContinueProcessing continue

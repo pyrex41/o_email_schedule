@@ -1,0 +1,234 @@
+```mermaid
+flowchart TD
+    Start([Database Operations Start]) --> OperationType{Operation Type}
+    
+    %% Smart Update Operations
+    OperationType -->|Smart Update| SmartUpdate[Smart Update System<br/>Intelligent schedule updates]
+    
+    subgraph "Smart Update Process"
+        SmartUpdate --> LoadExisting[Load Existing Schedules<br/>Query current email_schedules<br/>for comparison]
+        
+        LoadExisting --> CreateComparison[Create Schedule Comparison<br/>Compare new vs existing schedules<br/>by contact_id + email_type]
+        
+        CreateComparison --> AnalyzeChanges[Analyze Changes<br/>Detect modifications needed]
+        
+        AnalyzeChanges --> ChangeType{Change Type}
+        
+        %% New Schedules
+        ChangeType -->|New Schedule| NewScheduleInsert[New Schedule Insert<br/>Schedule doesn't exist<br/>Direct INSERT operation]
+        
+        %% Content Changes
+        ChangeType -->|Content Change| ContentUpdate[Content Change Update<br/>Different date/time/template<br/>Preserve original run_id]
+        
+        %% Status Changes
+        ChangeType -->|Status Change| StatusUpdate[Status Change Update<br/>PreScheduled -> Scheduled<br/>Maintain schedule data]
+        
+        %% No Changes
+        ChangeType -->|No Change| SkipUpdate[Skip Update<br/>Schedule identical<br/>No database operation]
+        
+        %% Deleted Schedules
+        ChangeType -->|Schedule Removed| ScheduleDelete[Schedule Deletion<br/>Remove obsolete schedules<br/>Clean up database]
+        
+        NewScheduleInsert --> BatchInsert[Batch Insert Operation<br/>INSERT multiple schedules<br/>Optimize performance]
+        
+        ContentUpdate --> PreserveRunID[Preserve Original Run ID<br/>Keep scheduler_run_id<br/>Track original creation]
+        
+        StatusUpdate --> UpdateStatus[Update Status Field<br/>Change status value<br/>Maintain other data]
+        
+        PreserveRunID --> BatchUpdate[Batch Update Operation<br/>UPDATE multiple records<br/>Optimize performance]
+        
+        UpdateStatus --> BatchUpdate
+        
+        ScheduleDelete --> BatchDelete[Batch Delete Operation<br/>DELETE obsolete records<br/>Maintain data integrity]
+        
+        BatchInsert --> TransactionBoundary[Transaction Boundary<br/>Ensure consistency]
+        BatchUpdate --> TransactionBoundary
+        BatchDelete --> TransactionBoundary
+        SkipUpdate --> TransactionBoundary
+    end
+    
+    %% Basic CRUD Operations
+    OperationType -->|Basic CRUD| CRUDOperations[Basic CRUD Operations<br/>Standard database operations]
+    
+    subgraph "CRUD Operations"
+        CRUDOperations --> CRUDType{CRUD Type}
+        
+        CRUDType -->|Create| CreateOperation[Create Operation<br/>INSERT new records]
+        CRUDType -->|Read| ReadOperation[Read Operation<br/>SELECT query operations]
+        CRUDType -->|Update| UpdateOperation[Update Operation<br/>UPDATE existing records]
+        CRUDType -->|Delete| DeleteOperation[Delete Operation<br/>DELETE records]
+        
+        %% Create Operations
+        CreateOperation --> CreateType{Create Type}
+        CreateType -->|Contact| CreateContact[Create Contact<br/>INSERT INTO contacts]
+        CreateType -->|Schedule| CreateSchedule[Create Email Schedule<br/>INSERT INTO email_schedules]
+        CreateType -->|Campaign| CreateCampaign[Create Campaign Instance<br/>INSERT INTO campaign_instances]
+        CreateType -->|Checkpoint| CreateCheckpoint[Create Scheduler Checkpoint<br/>INSERT INTO scheduler_checkpoints]
+        
+        %% Read Operations
+        ReadOperation --> ReadType{Read Type}
+        ReadType -->|All Contacts| ReadAllContacts[Read All Contacts<br/>SELECT * FROM contacts]
+        ReadType -->|Campaigns| ReadCampaigns[Read Active Campaigns<br/>SELECT * FROM campaign_instances<br/>WHERE active = true]
+        ReadType -->|Schedules| ReadSchedules[Read Email Schedules<br/>SELECT * FROM email_schedules<br/>WHERE conditions]
+        ReadType -->|Contact Campaigns| ReadContactCampaigns[Read Contact Campaigns<br/>SELECT * FROM contact_campaigns]
+        
+        %% Update Operations
+        UpdateOperation --> UpdateType{Update Type}
+        UpdateType -->|Schedule Status| UpdateScheduleStatus[Update Schedule Status<br/>UPDATE email_schedules<br/>SET status = ?]
+        UpdateType -->|Contact Data| UpdateContact[Update Contact Data<br/>UPDATE contacts<br/>SET fields = ?]
+        UpdateType -->|Campaign Status| UpdateCampaign[Update Campaign Status<br/>UPDATE campaign_instances<br/>SET active = ?]
+        
+        %% Delete Operations
+        DeleteOperation --> DeleteType{Delete Type}
+        DeleteType -->|Old Schedules| DeleteOldSchedules[Delete Old Schedules<br/>DELETE FROM email_schedules<br/>WHERE date < ?]
+        DeleteType -->|Cancelled Campaigns| DeleteCampaigns[Delete Cancelled Campaigns<br/>DELETE FROM campaign_instances<br/>WHERE status = 'cancelled']
+    end
+    
+    %% Transaction Management
+    subgraph "Transaction Management"
+        TransactionBoundary --> BeginTransaction[BEGIN TRANSACTION<br/>Start atomic operation]
+        
+        BeginTransaction --> ExecuteOperations[Execute Database Operations<br/>Perform all changes atomically]
+        
+        ExecuteOperations --> OperationResult{Operations<br/>Successful?}
+        
+        OperationResult -->|Success| CommitTransaction[COMMIT TRANSACTION<br/>Make changes permanent]
+        OperationResult -->|Failure| RollbackTransaction[ROLLBACK TRANSACTION<br/>Undo all changes]
+        
+        CommitTransaction --> TransactionSuccess[Transaction Success<br/>Changes applied]
+        RollbackTransaction --> TransactionFailure[Transaction Failure<br/>Changes reverted]
+    end
+    
+    %% Data Validation and Integrity
+    subgraph "Data Validation & Integrity"
+        DataValidation[Data Validation & Integrity]
+        
+        InputValidation[Input Validation<br/>- Check data types<br/>- Validate constraints<br/>- Sanitize inputs]
+        
+        ConstraintChecks[Constraint Checks<br/>- Foreign key validation<br/>- Unique constraints<br/>- Business rule validation]
+        
+        DataConsistency[Data Consistency<br/>- Cross-table validation<br/>- Referential integrity<br/>- Business logic consistency]
+        
+        ExecuteOperations --> InputValidation
+        InputValidation --> ConstraintChecks
+        ConstraintChecks --> DataConsistency
+        DataConsistency --> OperationResult
+    end
+    
+    %% Query Optimization
+    subgraph "Query Optimization"
+        QueryOptimization[Query Optimization]
+        
+        IndexUsage[Index Usage<br/>- Primary key optimization<br/>- Secondary index utilization<br/>- Query plan analysis]
+        
+        BatchOperations[Batch Operations<br/>- Bulk INSERT/UPDATE/DELETE<br/>- Reduced query overhead<br/>- Transaction efficiency]
+        
+        QueryCaching[Query Caching<br/>- Prepared statements<br/>- Result set caching<br/>- Connection pooling]
+        
+        ParameterBinding[Parameter Binding<br/>- SQL injection prevention<br/>- Query plan reuse<br/>- Type safety]
+    end
+    
+    %% Error Handling
+    subgraph "Database Error Handling"
+        DBErrorHandling[Database Error Handling]
+        
+        ConnectionErrors[Connection Errors<br/>- Database unavailable<br/>- Network timeouts<br/>- Authentication failures]
+        
+        QueryErrors[Query Errors<br/>- Syntax errors<br/>- Constraint violations<br/>- Data type mismatches]
+        
+        TransactionErrors[Transaction Errors<br/>- Deadlock detection<br/>- Lock timeouts<br/>- Concurrency conflicts]
+        
+        RecoveryMechanisms[Recovery Mechanisms<br/>- Retry logic<br/>- Connection recreation<br/>- Fallback procedures]
+        
+        OperationResult -->|Error| DBErrorHandling
+        ConnectionErrors --> RecoveryMechanisms
+        QueryErrors --> RecoveryMechanisms
+        TransactionErrors --> RollbackTransaction
+    end
+    
+    %% Audit and Logging
+    subgraph "Audit & Logging"
+        AuditLogging[Audit & Logging]
+        
+        OperationLogging[Operation Logging<br/>- Log all database operations<br/>- Track performance metrics<br/>- Record execution times]
+        
+        ChangeTracking[Change Tracking<br/>- Before/after values<br/>- User identification<br/>- Timestamp recording]
+        
+        SecurityAudit[Security Audit<br/>- Access logging<br/>- Permission verification<br/>- Compliance tracking]
+        
+        PerformanceMetrics[Performance Metrics<br/>- Query execution time<br/>- Resource utilization<br/>- Bottleneck identification]
+        
+        ExecuteOperations --> OperationLogging
+        TransactionSuccess --> ChangeTracking
+        DataValidation --> SecurityAudit
+        CommitTransaction --> PerformanceMetrics
+    end
+    
+    %% Database Schema Management
+    subgraph "Schema Management"
+        SchemaManagement[Database Schema Management]
+        
+        TableStructure[Table Structure<br/>- contacts: contact information<br/>- email_schedules: scheduling data<br/>- campaign_instances: campaign definitions<br/>- contact_campaigns: targeting data<br/>- scheduler_checkpoints: audit trail]
+        
+        IndexManagement[Index Management<br/>- Primary keys: performance<br/>- Foreign keys: referential integrity<br/>- Search indexes: query optimization<br/>- Composite indexes: complex queries]
+        
+        ConstraintManagement[Constraint Management<br/>- NOT NULL constraints<br/>- UNIQUE constraints<br/>- CHECK constraints<br/>- FOREIGN KEY constraints]
+        
+        MigrationManagement[Migration Management<br/>- Schema versioning<br/>- Backward compatibility<br/>- Data migration scripts<br/>- Rollback procedures]
+    end
+    
+    %% Performance Monitoring
+    subgraph "Performance Monitoring"
+        PerformanceMonitoring[Performance Monitoring]
+        
+        QueryAnalysis[Query Analysis<br/>- Slow query detection<br/>- Execution plan review<br/>- Index usage analysis<br/>- Performance optimization]
+        
+        ResourceMonitoring[Resource Monitoring<br/>- CPU utilization<br/>- Memory usage<br/>- Disk I/O patterns<br/>- Connection pool status]
+        
+        CapacityPlanning[Capacity Planning<br/>- Growth projections<br/>- Resource scaling<br/>- Performance thresholds<br/>- Bottleneck prediction]
+        
+        AlertingSystem[Alerting System<br/>- Performance degradation alerts<br/>- Error rate thresholds<br/>- Resource exhaustion warnings<br/>- Maintenance notifications]
+    end
+    
+    %% Results and Completion
+    CreateContact --> DatabaseSuccess[Database Operation Success]
+    CreateSchedule --> DatabaseSuccess
+    CreateCampaign --> DatabaseSuccess
+    CreateCheckpoint --> DatabaseSuccess
+    
+    ReadAllContacts --> QueryResults[Query Results Returned<br/>Data retrieved successfully]
+    ReadCampaigns --> QueryResults
+    ReadSchedules --> QueryResults
+    ReadContactCampaigns --> QueryResults
+    
+    UpdateScheduleStatus --> DatabaseSuccess
+    UpdateContact --> DatabaseSuccess
+    UpdateCampaign --> DatabaseSuccess
+    
+    DeleteOldSchedules --> DatabaseSuccess
+    DeleteCampaigns --> DatabaseSuccess
+    
+    TransactionSuccess --> DatabaseSuccess
+    QueryResults --> DatabaseSuccess
+    
+    TransactionFailure --> DatabaseError[Database Operation Failed<br/>Error logged and handled]
+    
+    DatabaseSuccess --> End([Database Operations Complete])
+    DatabaseError --> End
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef transaction fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef crud fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef validation fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef success fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef error fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef optimization fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class Start,End startEnd
+    class BeginTransaction,CommitTransaction,RollbackTransaction,TransactionBoundary transaction
+    class CreateOperation,ReadOperation,UpdateOperation,DeleteOperation crud
+    class InputValidation,ConstraintChecks,DataConsistency validation
+    class DatabaseSuccess,TransactionSuccess,QueryResults success
+    class DatabaseError,TransactionFailure error
+    class QueryOptimization,BatchOperations,IndexUsage optimization

@@ -1,0 +1,169 @@
+```mermaid
+flowchart TD
+    Start([Load Balancing Start]) --> Input[Input: Email Schedules<br/>from Anniversary + Campaign processing]
+    
+    Input --> LoadBalancingPipeline[Load Balancing Pipeline<br/>distribute_schedules]
+    
+    %% Phase 1: ED Smoothing
+    LoadBalancingPipeline --> Phase1[Phase 1: Effective Date Smoothing<br/>smooth_effective_dates]
+    
+    subgraph "ED Smoothing Process"
+        Phase1 --> SeparateEDEmails[Separate ED Emails<br/>Filter Anniversary EffectiveDate<br/>from other email types]
+        
+        SeparateEDEmails --> GroupEDByDate[Group ED Emails by Date<br/>group_by_date function<br/>Create daily statistics]
+        
+        GroupEDByDate --> AnalyzeEDDistribution[Analyze ED Distribution<br/>Check each day's ED count<br/>against soft limits]
+        
+        AnalyzeEDDistribution --> CheckEDLimits{Any days exceed<br/>ED soft limit?}
+        CheckEDLimits -->|No| NoEDSmoothing[No ED Smoothing Needed<br/>Proceed to next phase]
+        
+        CheckEDLimits -->|Yes| ProcessEDDays[Process Over-Limit Days]
+        
+        ProcessEDDays --> CalculateEDSoftLimit[Calculate ED Soft Limit<br/>min(config.ed_daily_soft_limit,<br/>30% of daily_cap)]
+        
+        CalculateEDSoftLimit --> ApplyEDJitter[Apply ED Jitter<br/>For each over-limit day]
+        
+        subgraph "ED Jitter Application"
+            ApplyEDJitter --> GetEDWindow[Get ED Smoothing Window<br/>config.ed_smoothing_window_days]
+            
+            GetEDWindow --> ForEachEDEmail[For Each ED Email on Over-Limit Day]
+            
+            ForEachEDEmail --> CalculateJitter[Calculate Jitter<br/>apply_jitter function<br/>- Use contact_id as seed<br/>- Use email_type for algorithm<br/>- Use smoothing window size]
+            
+            CalculateJitter --> ValidateNewDate[Validate New Date<br/>Ensure not in past<br/>compare_date new_date today >= 0]
+            
+            ValidateNewDate --> DateValid{New date valid?}
+            DateValid -->|Yes| UpdateEDSchedule[Update Schedule Date<br/>schedule.scheduled_date = new_date]
+            DateValid -->|No| KeepOriginalED[Keep Original Date<br/>No change to schedule]
+            
+            UpdateEDSchedule --> NextEDEmail{More ED emails<br/>on this day?}
+            KeepOriginalED --> NextEDEmail
+            NextEDEmail -->|Yes| ForEachEDEmail
+            NextEDEmail -->|No| EDDayComplete[ED Day Processing Complete]
+        end
+        
+        EDDayComplete --> MoreEDDays{More over-limit<br/>ED days?}
+        MoreEDDays -->|Yes| ProcessEDDays
+        MoreEDDays -->|No| CombineEDEmails[Combine Smoothed ED Emails<br/>with Other Email Types]
+    end
+    
+    NoEDSmoothing --> Phase2[Phase 2: Daily Cap Enforcement<br/>enforce_daily_caps]
+    CombineEDEmails --> Phase2
+    
+    %% Phase 2: Cap Enforcement
+    subgraph "Daily Cap Enforcement"
+        Phase2 --> GroupAllByDate[Group All Schedules by Date<br/>group_by_date function<br/>Include all email types]
+        
+        GroupAllByDate --> SortDaysChronologically[Sort Days Chronologically<br/>Process in date order<br/>for forward redistribution]
+        
+        SortDaysChronologically --> ProcessEachDay[Process Each Day<br/>Sequential day processing]
+        
+        ProcessEachDay --> CalculateDailyCap[Calculate Daily Cap<br/>total_contacts * daily_send_percentage_cap]
+        
+        CalculateDailyCap --> CalculateOverageThreshold[Calculate Overage Threshold<br/>daily_cap * overage_threshold]
+        
+        CalculateOverageThreshold --> CheckDayOverage{Day exceeds<br/>overage threshold?}
+        CheckDayOverage -->|No| ProcessNextDay[Day Within Limits<br/>Keep all schedules]
+        
+        CheckDayOverage -->|Yes| RedistributeDay[Redistribute Excess Emails]
+        
+        subgraph "Excess Email Redistribution"
+            RedistributeDay --> GetDaySchedules[Get All Schedules for Day<br/>Filter by scheduled_date]
+            
+            GetDaySchedules --> SortByPriority[Sort by Priority<br/>Lower number = higher priority<br/>Preserve important emails]
+            
+            SortByPriority --> SplitSchedules[Split Schedules<br/>keep_schedules: first daily_cap emails<br/>move_schedules: remaining emails]
+            
+            SplitSchedules --> FindNextDay{Next day<br/>available?}
+            FindNextDay -->|Yes| MoveToNextDay[Move to Next Day<br/>Update scheduled_date<br/>to next available day]
+            FindNextDay -->|No| CatchUpDistribution[Apply Catch-up Distribution<br/>distribute_catch_up]
+            
+            subgraph "Catch-up Distribution Logic"
+                CatchUpDistribution --> GetCatchUpWindow[Get Catch-up Window<br/>config.catch_up_spread_days]
+                
+                GetCatchUpWindow --> CalculateDistribution[Calculate Even Distribution<br/>Use modulo for spreading<br/>across catch-up period]
+                
+                CalculateDistribution --> ApplyCatchUpDates[Apply Catch-up Dates<br/>day_offset = (index mod spread_days) + 1<br/>new_date = today + day_offset]
+            end
+            
+            MoveToNextDay --> RedistributionComplete[Redistribution Complete<br/>for this day]
+            ApplyCatchUpDates --> RedistributionComplete
+        end
+        
+        ProcessNextDay --> NextDayCheck{More days to<br/>process?}
+        RedistributionComplete --> NextDayCheck
+        NextDayCheck -->|Yes| ProcessEachDay
+        NextDayCheck -->|No| CapEnforcementComplete[Cap Enforcement Complete]
+    end
+    
+    CapEnforcementComplete --> Phase3[Phase 3: Final Validation<br/>Validate redistributed schedules]
+    
+    subgraph "Final Validation & Metrics"
+        Phase3 --> ValidateAllDates[Validate All Dates<br/>Ensure no past dates<br/>Check for scheduling conflicts]
+        
+        ValidateAllDates --> CalculateDistributionMetrics[Calculate Distribution Metrics<br/>analyze_distribution function]
+        
+        CalculateDistributionMetrics --> GenerateAnalysis[Generate Distribution Analysis<br/>- total_emails: int<br/>- total_days: int<br/>- avg_per_day: float<br/>- max_day: int<br/>- min_day: int<br/>- distribution_variance: int]
+        
+        GenerateAnalysis --> CreateLoadBalancingResult[Create Load Balancing Result<br/>Return balanced schedules<br/>with distribution analysis]
+    end
+    
+    CreateLoadBalancingResult --> End([Load Balancing Complete])
+    
+    %% Configuration & Settings
+    subgraph "Load Balancing Configuration"
+        Config[Load Balancing Config<br/>- daily_send_percentage_cap: float<br/>- ed_daily_soft_limit: int<br/>- ed_smoothing_window_days: int<br/>- catch_up_spread_days: int<br/>- overage_threshold: float<br/>- total_contacts: int]
+        
+        Calculations[Derived Calculations<br/>- daily_cap = total_contacts * percentage_cap<br/>- ed_soft_limit = min(ed_limit, 30% of daily_cap)<br/>- overage_threshold_count = daily_cap * overage_threshold]
+    end
+    
+    %% Jitter Algorithm Details
+    subgraph "Jitter Algorithm"
+        JitterInputs[Jitter Inputs<br/>- contact_id: deterministic seed<br/>- email_type: algorithm variation<br/>- year: temporal context<br/>- window_days: redistribution range]
+        
+        JitterCalc[Jitter Calculation<br/>calculate_jitter function<br/>- Hash contact_id + email_type + year<br/>- Apply modulo window_days<br/>- Return offset within [-window/2, +window/2]]
+        
+        JitterApplication[Jitter Application<br/>new_date = original_date + jitter_offset<br/>Deterministic but distributed results]
+    end
+    
+    %% Distribution Analysis
+    subgraph "Distribution Analysis Details"
+        DailyStats[Daily Statistics<br/>- date: Date_time.date<br/>- total_count: int<br/>- ed_count: int<br/>- campaign_count: int<br/>- anniversary_count: int<br/>- over_threshold: bool]
+        
+        AnalysisMetrics[Analysis Metrics<br/>- Variance calculation<br/>- Peak day identification<br/>- Distribution evenness<br/>- Capacity utilization]
+    end
+    
+    %% Error Handling
+    subgraph "Error Handling"
+        JitterErrors[Jitter Errors<br/>- Date calculation failures<br/>- Invalid window parameters<br/>- Algorithm exceptions]
+        
+        DistributionErrors[Distribution Errors<br/>- Capacity overflow<br/>- Invalid date ranges<br/>- Configuration errors]
+        
+        ErrorRecovery[Error Recovery<br/>- Fall back to original dates<br/>- Log errors for analysis<br/>- Continue processing]
+    end
+    
+    %% Performance Considerations
+    subgraph "Performance Optimizations"
+        Batching[Batch Processing<br/>- Group operations by date<br/>- Minimize date recalculations<br/>- Efficient data structures]
+        
+        Caching[Caching Strategy<br/>- Cache daily statistics<br/>- Reuse jitter calculations<br/>- Optimize date comparisons]
+        
+        Parallelization[Parallelization Potential<br/>- Independent day processing<br/>- Concurrent jitter application<br/>- Parallel analysis calculation]
+    end
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef phase fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef process fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef decision fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef calculation fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    classDef redistribution fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef validation fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    
+    class Start,End startEnd
+    class Phase1,Phase2,Phase3 phase
+    class SeparateEDEmails,GroupEDByDate,ProcessEachDay,GetDaySchedules process
+    class CheckEDLimits,CheckDayOverage,DateValid,FindNextDay decision
+    class CalculateEDSoftLimit,CalculateDailyCap,CalculateJitter calculation
+    class RedistributeDay,MoveToNextDay,CatchUpDistribution redistribution
+    class ValidateAllDates,CalculateDistributionMetrics validation

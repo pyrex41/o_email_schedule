@@ -1,0 +1,205 @@
+```mermaid
+flowchart TD
+    Start([State Exclusion Rule Lookup]) --> GetState[Get Contact State<br/>contact.state]
+    
+    GetState --> HasState{Contact has<br/>valid state?}
+    HasState -->|No| NoExclusion[No State Exclusion<br/>Return: NotExcluded]
+    HasState -->|Yes| StateSwitch[State-Specific Rule Lookup]
+    
+    %% State-specific branches
+    StateSwitch --> StateType{State Type}
+    
+    %% Year-Round Exclusion States
+    StateType -->|Special Exclusion States| YearRoundStates[Year-Round Exclusion States<br/>Permanent email blocking]
+    
+    %% Regular Exclusion Window States
+    StateType -->|Window-Based States| WindowStates[Window-Based Exclusion States<br/>Temporary exclusion periods]
+    
+    %% No Exclusion States
+    StateType -->|Unrestricted States| NoExclusionStates[No Exclusion States<br/>No anniversary email restrictions]
+    
+    %% Year-Round Exclusion Details
+    subgraph "Year-Round Exclusion States"
+        YearRoundStates --> CheckYearRound{State in year-round<br/>exclusion list?}
+        CheckYearRound -->|Yes| YearRoundExcluded[Return: Excluded<br/>reason: Year-round exclusion for STATE<br/>window_end: None]
+        CheckYearRound -->|No| CheckWindows[Check for Window Rules]
+    end
+    
+    %% Window-Based Exclusion Details
+    subgraph "Window-Based Exclusion States"
+        WindowStates --> EmailTypeCheck{Email Type}
+        CheckWindows --> EmailTypeCheck
+        
+        %% Birthday Window Rules
+        EmailTypeCheck -->|Birthday Anniversary| BirthdayWindows[Birthday Exclusion Windows]
+        
+        BirthdayWindows --> BirthdayStateRules{State-Specific<br/>Birthday Rules}
+        
+        BirthdayStateRules -->|CA| CABirthday[California Birthday Rules<br/>before_days: 30<br/>after_days: 30<br/>Special: Enhanced compliance]
+        
+        BirthdayStateRules -->|NY| NYBirthday[New York Birthday Rules<br/>before_days: 45<br/>after_days: 45<br/>Special: Extended window]
+        
+        BirthdayStateRules -->|NV| NVBirthday[Nevada Birthday Rules<br/>before_days: 30<br/>after_days: 30<br/>Special: Month-start alignment]
+        
+        BirthdayStateRules -->|MA| MABirthday[Massachusetts Birthday Rules<br/>before_days: 21<br/>after_days: 21<br/>Special: Standard window]
+        
+        BirthdayStateRules -->|CT| CTBirthday[Connecticut Birthday Rules<br/>before_days: 14<br/>after_days: 14<br/>Special: Reduced window]
+        
+        BirthdayStateRules -->|Other States| OtherBirthday[Other States Birthday Rules<br/>Default configuration<br/>or no exclusion]
+        
+        %% Effective Date Window Rules
+        EmailTypeCheck -->|Effective Date Anniversary| EDWindows[Effective Date Exclusion Windows]
+        
+        EDWindows --> EDStateRules{State-Specific<br/>Effective Date Rules}
+        
+        EDStateRules -->|CA| CAED[California ED Rules<br/>before_days: 30<br/>after_days: 30<br/>Special: Policy anniversary protection]
+        
+        EDStateRules -->|NY| NYED[New York ED Rules<br/>before_days: 45<br/>after_days: 45<br/>Special: Extended protection]
+        
+        EDStateRules -->|NV| NVED[Nevada ED Rules<br/>before_days: 30<br/>after_days: 30<br/>Special: Month boundary rules]
+        
+        EDStateRules -->|TX| TXED[Texas ED Rules<br/>before_days: 15<br/>after_days: 15<br/>Special: Standard protection]
+        
+        EDStateRules -->|FL| FLED[Florida ED Rules<br/>before_days: 21<br/>after_days: 21<br/>Special: Hurricane season awareness]
+        
+        EDStateRules -->|Other States| OtherED[Other States ED Rules<br/>Default configuration<br/>or no exclusion]
+        
+        %% AEP Window Rules
+        EmailTypeCheck -->|AEP Anniversary| AEPWindows[AEP Exclusion Windows<br/>Annual Enrollment Period]
+        
+        AEPWindows --> AEPStateRules{State-Specific<br/>AEP Rules}
+        
+        AEPStateRules -->|CA| CAAEP[California AEP Rules<br/>before_days: 60<br/>after_days: 30<br/>Special: Extended pre-period]
+        
+        AEPStateRules -->|All Other States| StandardAEP[Standard AEP Rules<br/>before_days: 45<br/>after_days: 15<br/>Special: Federal guidelines]
+    end
+    
+    %% Special Rules and Modifications
+    subgraph "Nevada Special Rules"
+        NVSpecial[Nevada Month-Start Rules<br/>Enhanced compliance logic]
+        
+        NVSpecial --> NVMonthCheck[Check Month Boundary<br/>Is exclusion near month start?]
+        
+        NVMonthCheck --> NVAdjustment{Apply month-start<br/>adjustment?}
+        NVAdjustment -->|Yes| NVModified[Modified Nevada Window<br/>Adjust for month start<br/>Ensure compliance]
+        NVAdjustment -->|No| NVStandard[Standard Nevada Window<br/>Apply regular rules]
+    end
+    
+    %% Window Calculation Logic
+    subgraph "Window Calculation"
+        WindowCalc[Window Calculation Logic<br/>in_exclusion_window function]
+        
+        WindowCalc --> GetAnniversary[Get Next Anniversary<br/>next_anniversary(check_date, anniversary_date)]
+        
+        GetAnniversary --> CalcWindowBounds[Calculate Window Bounds<br/>window_start = anniversary - before_days<br/>window_end = anniversary + after_days]
+        
+        CalcWindowBounds --> CheckDateInWindow{check_date within<br/>window bounds?}
+        CheckDateInWindow -->|Yes| InWindow[Date in Exclusion Window<br/>Return: true]
+        CheckDateInWindow -->|No| OutOfWindow[Date outside Window<br/>Return: false]
+    end
+    
+    %% State Configuration Matrix
+    subgraph "State Configuration Matrix"
+        StateMatrix[State Configuration Matrix]
+        
+        YearRoundList[Year-Round Exclusion States<br/>- List maintained in configuration<br/>- Can be updated for compliance<br/>- No anniversary emails ever sent]
+        
+        WindowConfig[Window Configuration Table<br/>State | Email Type | Before Days | After Days | Special Rules<br/>CA | Birthday | 30 | 30 | Enhanced<br/>CA | ED | 30 | 30 | Policy protection<br/>NY | Birthday | 45 | 45 | Extended<br/>NV | Birthday | 30 | 30 | Month-start<br/>... (other states)]
+        
+        DefaultRules[Default Rules<br/>- Applied when state not configured<br/>- Conservative approach<br/>- Can be overridden per state]
+    end
+    
+    %% Business Rule Variations
+    subgraph "Business Rule Variations"
+        BusinessRules[Business Rule Variations]
+        
+        SeasonalRules[Seasonal Rules (Future)<br/>- Holiday period adjustments<br/>- Hurricane season modifications<br/>- Tax season considerations]
+        
+        RegulatoryUpdates[Regulatory Updates<br/>- State law changes<br/>- Federal guideline updates<br/>- Industry standard modifications]
+        
+        ComplianceOverrides[Compliance Overrides<br/>- Emergency exceptions<br/>- Business necessity rules<br/>- Customer request handling]
+    end
+    
+    %% Return Results
+    CABirthday --> WindowCalc
+    NYBirthday --> WindowCalc
+    NVBirthday --> NVSpecial
+    MABirthday --> WindowCalc
+    CTBirthday --> WindowCalc
+    OtherBirthday --> CheckDefaultWindow{Default window<br/>configured?}
+    
+    CAED --> WindowCalc
+    NYED --> WindowCalc
+    NVED --> NVSpecial
+    TXED --> WindowCalc
+    FLED --> WindowCalc
+    OtherED --> CheckDefaultWindow
+    
+    CAAEP --> WindowCalc
+    StandardAEP --> WindowCalc
+    
+    NVModified --> WindowCalc
+    NVStandard --> WindowCalc
+    
+    CheckDefaultWindow -->|Yes| DefaultWindowCalc[Apply Default Window<br/>Use configured defaults]
+    CheckDefaultWindow -->|No| NoWindowExclusion[No Window Exclusion<br/>Return: NotExcluded]
+    
+    DefaultWindowCalc --> WindowCalc
+    
+    InWindow --> WindowExcluded[Return: Excluded<br/>reason: TYPE exclusion window for STATE<br/>window_end: calculated_end_date]
+    OutOfWindow --> WindowNotExcluded[Return: NotExcluded]
+    
+    %% No Exclusion States
+    NoExclusionStates --> UnrestrictedStates[Unrestricted States<br/>- No anniversary email restrictions<br/>- Full email calendar allowed<br/>- Business as usual]
+    
+    UnrestrictedStates --> NoExclusion
+    
+    %% Final Results
+    YearRoundExcluded --> End([State Rule Applied])
+    WindowExcluded --> End
+    WindowNotExcluded --> End
+    NoWindowExclusion --> End
+    NoExclusion --> End
+    
+    %% Configuration Management
+    subgraph "Configuration Management"
+        ConfigMgmt[Configuration Management]
+        
+        RuleUpdates[Rule Updates<br/>- Version control for rules<br/>- A/B testing capability<br/>- Rollback mechanisms]
+        
+        StateMapping[State Mapping<br/>- Handle state code variations<br/>- Territory handling<br/>- Geographic edge cases]
+        
+        ValidationRules[Validation Rules<br/>- Ensure rule consistency<br/>- Validate date ranges<br/>- Check business logic]
+        
+        AuditTrail[Audit Trail<br/>- Track rule changes<br/>- Document compliance reasons<br/>- Regulatory reporting]
+    end
+    
+    %% Testing and Validation
+    subgraph "Testing Framework"
+        TestingFramework[Rule Testing Framework]
+        
+        UnitTests[Unit Tests<br/>- Test each state individually<br/>- Verify window calculations<br/>- Check edge cases]
+        
+        IntegrationTests[Integration Tests<br/>- Test rule combinations<br/>- Verify system behavior<br/>- End-to-end validation]
+        
+        ComplianceTests[Compliance Tests<br/>- Regulatory requirement verification<br/>- Business rule adherence<br/>- Customer impact assessment]
+        
+        EdgeCaseTesting[Edge Case Testing<br/>- Leap year handling<br/>- Month boundary cases<br/>- Timezone transitions]
+    end
+    
+    %% Styling
+    classDef startEnd fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef stateRule fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef exclusion fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef noExclusion fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef special fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef calculation fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    
+    class Start,End startEnd
+    class CABirthday,NYBirthday,NVBirthday,MABirthday,CTBirthday,CAED,NYED,NVED stateRule
+    class HasState,StateType,CheckYearRound,EmailTypeCheck,BirthdayStateRules decision
+    class YearRoundExcluded,WindowExcluded exclusion
+    class NoExclusion,WindowNotExcluded,NoWindowExclusion noExclusion
+    class NVSpecial,NVModified special
+    class WindowCalc,CalcWindowBounds calculation
