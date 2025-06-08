@@ -25,6 +25,16 @@ bisect*.coverage
 # Build artifacts
 medicare_email_schedule.install
 
+# sqlite binaries
+sqlite3
+sqlite3.exe
+sqlite3_analyzer
+sqlite3_analyzer.exe
+sqlite3_rsync
+sqlite3_rsync.exe
+sqldiff
+sqldiff.exe
+
 # Local database
 *.db
 *.db-shm
