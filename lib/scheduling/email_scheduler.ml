@@ -33,14 +33,61 @@ let calculate_spread_date contact_id spread_start_date spread_end_date =
   let hash_value = contact_id mod total_days in
   add_days start_date hash_value
 
+(* Check if contact should be excluded based on organization settings and campaign config *)
+let should_exclude_contact config campaign_config contact =
+  (* Check global underwriting exclusion *)
+  if config.organization.exclude_failed_underwriting_global && contact.failed_underwriting then
+    (* Only allow AEP campaigns for failed underwriting contacts *)
+    if campaign_config.name <> "aep" then
+      Some "Failed underwriting - global exclusion"
+    else
+      None
+  else if campaign_config.skip_failed_underwriting && contact.failed_underwriting then
+    Some "Failed underwriting - campaign exclusion"
+  else
+    None
+
+(* Check if contact is valid for scheduling with enhanced logic *)
+let is_contact_valid_for_scheduling config campaign_instance contact =
+  (* Basic email validation *)
+  if contact.email = "" then
+    false
+  else
+    (* Check if we need zip code/state for this campaign *)
+    let requires_location = match (campaign_instance.target_states, campaign_instance.target_carriers) with
+      | (None, None) -> false (* Universal campaign *)
+      | (Some states, _) when states = "ALL" -> false (* Explicitly universal *)
+      | (_, Some carriers) when carriers = "ALL" -> false (* Explicitly universal *)
+      | _ -> true (* Has targeting constraints *)
+    in
+    
+    if requires_location then
+      (* Campaign has targeting - need valid location data *)
+      contact.zip_code <> None || contact.state <> None
+    else
+      (* Universal campaign - send even without zip code if org allows *)
+      config.organization.send_without_zipcode_for_universal
+
+(* Enhanced effective date validation with configurable timing *)
+let should_send_effective_date_email config contact effective_date =
+  let today = current_date () in
+  let months_since_effective = 
+    let years_diff = today.year - effective_date.year in
+    let months_diff = today.month - effective_date.month in
+    years_diff * 12 + months_diff
+  in
+  
+  (* Only send if we've passed the minimum months threshold *)
+  months_since_effective >= config.organization.effective_date_first_email_months
+
 let calculate_campaign_emails context campaign_instance campaign_config =
   let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
   let schedules = ref [] in
   
-  (* Get contacts for this campaign *)
+  (* Get contacts for this campaign with targeting *)
   let contacts = 
     if campaign_config.target_all_contacts then
-      match Database_native.get_all_contacts_for_campaign () with
+      match Database_native.get_contacts_for_campaign campaign_instance with
       | Ok contacts -> contacts
       | Error _ -> []
     else
@@ -48,7 +95,6 @@ let calculate_campaign_emails context campaign_instance campaign_config =
       | Ok contact_campaigns ->
           (* Get the actual contact records for the contact_campaigns *)
           List.filter_map (fun cc ->
-            (* This is a simplified approach - in practice, you'd batch fetch contacts *)
             try
               match Database_native.get_all_contacts () with
               | Ok all_contacts -> 
@@ -60,189 +106,231 @@ let calculate_campaign_emails context campaign_instance campaign_config =
   in
   
   List.iter (fun contact ->
-    let scheduled_date = 
-      if campaign_config.spread_evenly then
-        match (campaign_instance.spread_start_date, campaign_instance.spread_end_date) with
-        | (Some start_date, Some end_date) ->
-            calculate_spread_date contact.id start_date end_date
-        | _ ->
-            (* Fallback to regular calculation if spread dates not set *)
-            let today = current_date () in
-            add_days today campaign_config.days_before_event
-      else
-        (* Regular campaign scheduling *)
-        let trigger_date = 
-          if campaign_config.target_all_contacts then
-            current_date () (* Use today as trigger for "all contacts" campaigns *)
-          else
-            (* Get trigger date from contact_campaigns table *)
-            match Database_native.get_contact_campaigns_for_instance campaign_instance.id with
-            | Ok contact_campaigns ->
-                (match List.find_opt (fun cc -> cc.contact_id = contact.id) contact_campaigns with
-                 | Some cc -> 
-                     (match cc.trigger_date with
-                      | Some date -> date
-                      | None -> current_date ())
-                 | None -> current_date ())
-            | Error _ -> current_date ()
-        in
-        add_days trigger_date campaign_config.days_before_event
-    in
-    
-    (* Create campaign email type *)
-    let campaign_email = {
-      campaign_type = campaign_config.name;
-      instance_id = campaign_instance.id;
-      respect_exclusions = campaign_config.respect_exclusion_windows;
-      days_before_event = campaign_config.days_before_event;
-      priority = campaign_config.priority;
-    } in
-    
-    let email_type = Campaign campaign_email in
-    
-    (* Check exclusion windows if required *)
-    let should_skip = 
-      if campaign_config.respect_exclusion_windows then
-        should_skip_email contact email_type scheduled_date
-      else
-        false
-    in
-    
-    let (status, skip_reason) = 
-      if should_skip then
-        let reason = match check_exclusion_window contact scheduled_date with
-          | Excluded { reason; _ } -> reason
-          | NotExcluded -> "Unknown exclusion"
-        in
-        (Skipped reason, reason)
-      else
-        (PreScheduled, "")
-    in
-    
-    let schedule = {
-      contact_id = contact.id;
-      email_type;
-      scheduled_date;
-      scheduled_time = send_time;
-      status;
-      priority = campaign_config.priority;
-      template_id = campaign_instance.email_template;
-      campaign_instance_id = Some campaign_instance.id;
-      scheduler_run_id = context.run_id;
-    } in
-    schedules := schedule :: !schedules
+    (* Check if contact is valid for this campaign *)
+    if Contact.is_valid_for_campaign_scheduling context.config.organization campaign_instance contact then
+      (* Check organization-level exclusions *)
+      match should_exclude_contact context.config campaign_config contact with
+      | Some exclusion_reason ->
+          (* Contact is excluded - create skipped schedule *)
+          let scheduled_date = current_date () in (* Placeholder date *)
+          let campaign_email = {
+            campaign_type = campaign_config.name;
+            instance_id = campaign_instance.id;
+            respect_exclusions = campaign_config.respect_exclusion_windows;
+            days_before_event = campaign_config.days_before_event;
+            priority = campaign_config.priority;
+          } in
+          let schedule = {
+            contact_id = contact.id;
+            email_type = Campaign campaign_email;
+            scheduled_date;
+            scheduled_time = send_time;
+            status = Skipped exclusion_reason;
+            priority = campaign_config.priority;
+            template_id = campaign_instance.email_template;
+            campaign_instance_id = Some campaign_instance.id;
+            scheduler_run_id = context.run_id;
+          } in
+          schedules := schedule :: !schedules
+      | None ->
+          (* Contact is eligible - calculate schedule date *)
+          let scheduled_date = 
+            if campaign_config.spread_evenly then
+              match (campaign_instance.spread_start_date, campaign_instance.spread_end_date) with
+              | (Some start_date, Some end_date) ->
+                  calculate_spread_date contact.id start_date end_date
+              | _ ->
+                  (* Fallback to regular calculation if spread dates not set *)
+                  let today = current_date () in
+                  add_days today campaign_config.days_before_event
+            else
+              (* Regular campaign scheduling *)
+              let trigger_date = 
+                if campaign_config.target_all_contacts then
+                  current_date () (* Use today as trigger for "all contacts" campaigns *)
+                else
+                  (* Get trigger date from contact_campaigns table *)
+                  match Database_native.get_contact_campaigns_for_instance campaign_instance.id with
+                  | Ok contact_campaigns ->
+                      (match List.find_opt (fun cc -> cc.contact_id = contact.id) contact_campaigns with
+                       | Some cc -> 
+                           (match cc.trigger_date with
+                            | Some date -> date
+                            | None -> current_date ())
+                       | None -> current_date ())
+                  | Error _ -> current_date ()
+              in
+              add_days trigger_date campaign_config.days_before_event
+          in
+          
+          (* Create campaign email type *)
+          let campaign_email = {
+            campaign_type = campaign_config.name;
+            instance_id = campaign_instance.id;
+            respect_exclusions = campaign_config.respect_exclusion_windows;
+            days_before_event = campaign_config.days_before_event;
+            priority = campaign_config.priority;
+          } in
+          
+          let email_type = Campaign campaign_email in
+          
+          (* Check exclusion windows if required *)
+          let should_skip = 
+            if campaign_config.respect_exclusion_windows then
+              should_skip_email contact email_type scheduled_date
+            else
+              false
+          in
+          
+          let (status, skip_reason) = 
+            if should_skip then
+              let reason = match check_exclusion_window contact scheduled_date with
+                | Excluded { reason; _ } -> reason
+                | NotExcluded -> "Unknown exclusion"
+              in
+              (Skipped reason, reason)
+            else
+              (PreScheduled, "")
+          in
+          
+          let schedule = {
+            contact_id = contact.id;
+            email_type;
+            scheduled_date;
+            scheduled_time = send_time;
+            status;
+            priority = campaign_config.priority;
+            template_id = campaign_instance.email_template;
+            campaign_instance_id = Some campaign_instance.id;
+            scheduler_run_id = context.run_id;
+          } in
+          schedules := schedule :: !schedules
   ) contacts;
   
   !schedules
 
+(* Enhanced anniversary email calculation with organization config *)
 let calculate_anniversary_emails context contact =
   let today = current_date () in
   let schedules = ref [] in
   
   let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
   
-  begin match contact.birthday with
-  | Some birthday ->
-      let next_bday = next_anniversary today birthday in
-      let birthday_send_date = add_days next_bday (-context.config.birthday_days_before) in
-      
-      if not (should_skip_email contact (Anniversary Birthday) birthday_send_date) then
-        let schedule = {
-          contact_id = contact.id;
-          email_type = Anniversary Birthday;
-          scheduled_date = birthday_send_date;
-          scheduled_time = send_time;
-          status = PreScheduled;
-          priority = priority_of_email_type (Anniversary Birthday);
-          template_id = Some "birthday_template";
-          campaign_instance_id = None;
-          scheduler_run_id = context.run_id;
-        } in
-        schedules := schedule :: !schedules
-      else
-        let skip_reason = match check_exclusion_window contact birthday_send_date with
-          | Excluded { reason; _ } -> reason
-          | NotExcluded -> "Unknown exclusion"
-        in
-        let schedule = {
-          contact_id = contact.id;
-          email_type = Anniversary Birthday;
-          scheduled_date = birthday_send_date;
-          scheduled_time = send_time;
-          status = Skipped skip_reason;
-          priority = priority_of_email_type (Anniversary Birthday);
-          template_id = Some "birthday_template";
-          campaign_instance_id = None;
-          scheduler_run_id = context.run_id;
-        } in
-        schedules := schedule :: !schedules
-  | None -> ()
-  end;
-  
-  begin match contact.effective_date with
-  | Some ed ->
-      let next_ed = next_anniversary today ed in
-      let ed_send_date = add_days next_ed (-context.config.effective_date_days_before) in
-      
-      if not (should_skip_email contact (Anniversary EffectiveDate) ed_send_date) then
-        let schedule = {
-          contact_id = contact.id;
-          email_type = Anniversary EffectiveDate;
-          scheduled_date = ed_send_date;
-          scheduled_time = send_time;
-          status = PreScheduled;
-          priority = priority_of_email_type (Anniversary EffectiveDate);
-          template_id = Some "effective_date_template";
-          campaign_instance_id = None;
-          scheduler_run_id = context.run_id;
-        } in
-        schedules := schedule :: !schedules
-      else
-        let skip_reason = match check_exclusion_window contact ed_send_date with
-          | Excluded { reason; _ } -> reason
-          | NotExcluded -> "Unknown exclusion"
-        in
-        let schedule = {
-          contact_id = contact.id;
-          email_type = Anniversary EffectiveDate;
-          scheduled_date = ed_send_date;
-          scheduled_time = send_time;
-          status = Skipped skip_reason;
-          priority = priority_of_email_type (Anniversary EffectiveDate);
-          template_id = Some "effective_date_template";
-          campaign_instance_id = None;
-          scheduler_run_id = context.run_id;
-        } in
-        schedules := schedule :: !schedules
-  | None -> ()
-  end;
-  
-  !schedules
+  (* Check organization-level underwriting exclusion for anniversary emails *)
+  if context.config.organization.exclude_failed_underwriting_global && contact.failed_underwriting then
+    (* Skip all anniversary emails for failed underwriting *)
+    !schedules
+  else (
+    begin match contact.birthday with
+    | Some birthday ->
+        let next_bday = next_anniversary today birthday in
+        let birthday_send_date = add_days next_bday (-context.config.birthday_days_before) in
+        
+        if not (should_skip_email contact (Anniversary Birthday) birthday_send_date) then
+          let schedule = {
+            contact_id = contact.id;
+            email_type = Anniversary Birthday;
+            scheduled_date = birthday_send_date;
+            scheduled_time = send_time;
+            status = PreScheduled;
+            priority = priority_of_email_type (Anniversary Birthday);
+            template_id = Some "birthday_template";
+            campaign_instance_id = None;
+            scheduler_run_id = context.run_id;
+          } in
+          schedules := schedule :: !schedules
+        else
+          let skip_reason = match check_exclusion_window contact birthday_send_date with
+            | Excluded { reason; _ } -> reason
+            | NotExcluded -> "Unknown exclusion"
+          in
+          let schedule = {
+            contact_id = contact.id;
+            email_type = Anniversary Birthday;
+            scheduled_date = birthday_send_date;
+            scheduled_time = send_time;
+            status = Skipped skip_reason;
+            priority = priority_of_email_type (Anniversary Birthday);
+            template_id = Some "birthday_template";
+            campaign_instance_id = None;
+            scheduler_run_id = context.run_id;
+          } in
+          schedules := schedule :: !schedules
+    | None -> ()
+    end;
+    
+    begin match contact.effective_date with
+    | Some ed ->
+        (* Check if enough time has passed since effective date *)
+        if should_send_effective_date_email context.config contact ed then
+          let next_ed = next_anniversary today ed in
+          let ed_send_date = add_days next_ed (-context.config.effective_date_days_before) in
+          
+          if not (should_skip_email contact (Anniversary EffectiveDate) ed_send_date) then
+            let schedule = {
+              contact_id = contact.id;
+              email_type = Anniversary EffectiveDate;
+              scheduled_date = ed_send_date;
+              scheduled_time = send_time;
+              status = PreScheduled;
+              priority = priority_of_email_type (Anniversary EffectiveDate);
+              template_id = Some "effective_date_template";
+              campaign_instance_id = None;
+              scheduler_run_id = context.run_id;
+            } in
+            schedules := schedule :: !schedules
+          else
+            let skip_reason = match check_exclusion_window contact ed_send_date with
+              | Excluded { reason; _ } -> reason
+              | NotExcluded -> "Unknown exclusion"
+            in
+            let schedule = {
+              contact_id = contact.id;
+              email_type = Anniversary EffectiveDate;
+              scheduled_date = ed_send_date;
+              scheduled_time = send_time;
+              status = Skipped skip_reason;
+              priority = priority_of_email_type (Anniversary EffectiveDate);
+              template_id = Some "effective_date_template";
+              campaign_instance_id = None;
+              scheduler_run_id = context.run_id;
+            } in
+            schedules := schedule :: !schedules
+    | None -> ()
+    end;
+    
+    !schedules
+  )
 
+(* Enhanced post-window email calculation with organization config *)
 let calculate_post_window_emails context contact =
-  match get_post_window_date contact with
-  | Some post_date ->
-      let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
-      let schedule = {
-        contact_id = contact.id;
-        email_type = Anniversary PostWindow;
-        scheduled_date = post_date;
-        scheduled_time = send_time;
-        status = PreScheduled;
-        priority = priority_of_email_type (Anniversary PostWindow);
-        template_id = Some "post_window_template";
-        campaign_instance_id = None;
-        scheduler_run_id = context.run_id;
-      } in
-      [schedule]
-  | None -> []
+  (* Check if organization enables post-window emails *)
+  if not context.config.organization.enable_post_window_emails then
+    []
+  else
+    match get_post_window_date contact with
+    | Some post_date ->
+        let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+        let schedule = {
+          contact_id = contact.id;
+          email_type = Anniversary PostWindow;
+          scheduled_date = post_date;
+          scheduled_time = send_time;
+          status = PreScheduled;
+          priority = priority_of_email_type (Anniversary PostWindow);
+          template_id = Some "post_window_template";
+          campaign_instance_id = None;
+          scheduler_run_id = context.run_id;
+        } in
+        [schedule]
+    | None -> []
 
 let calculate_schedules_for_contact context contact =
   try
-    if not (Contact.is_valid_for_scheduling contact) then
+    if not (Contact.is_valid_for_anniversary_scheduling context.config.organization contact) then
       Error (InvalidContactData { 
         contact_id = contact.id; 
-        reason = "Contact failed validation" 
+        reason = "Contact failed anniversary scheduling validation" 
       })
     else
       let anniversary_schedules = calculate_anniversary_emails context contact in
