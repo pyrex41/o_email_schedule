@@ -46,7 +46,13 @@ let parse_datetime datetime_str =
            | [hour_str; minute_str; second_str] ->
                let hour = int_of_string hour_str in
                let minute = int_of_string minute_str in
-               let second = int_of_string (String.sub second_str 0 2) in (* Handle fractional seconds *)
+               (* Handle fractional seconds and short second strings safely *)
+               let second = 
+                 if String.length second_str >= 2 then
+                   int_of_string (String.sub second_str 0 2)
+                 else
+                   int_of_string second_str
+               in
                make_datetime date (make_time hour minute second)
            | _ -> current_datetime ())
       | [date_part] ->
