@@ -74,16 +74,57 @@ let string_of_anniversary_email = function
   | EffectiveDate -> "effective_date"
   | PostWindow -> "post_window"
 
+let anniversary_email_of_string = function
+  | "birthday" -> Birthday
+  | "effective_date" -> EffectiveDate
+  | "post_window" -> PostWindow
+  | s -> failwith ("Unknown anniversary email type: " ^ s)
+
 let string_of_followup_type = function
   | Cold -> "cold"
   | ClickedNoHQ -> "clicked_no_hq"
   | HQNoYes -> "hq_no_yes"
   | HQWithYes -> "hq_with_yes"
 
+let followup_type_of_string = function
+  | "cold" -> Cold
+  | "clicked_no_hq" -> ClickedNoHQ
+  | "hq_no_yes" -> HQNoYes
+  | "hq_with_yes" -> HQWithYes
+  | s -> failwith ("Unknown followup type: " ^ s)
+
 let string_of_email_type = function
   | Anniversary a -> string_of_anniversary_email a
   | Campaign c -> Printf.sprintf "campaign_%s_%d" c.campaign_type c.instance_id
   | Followup f -> Printf.sprintf "followup_%s" (string_of_followup_type f)
+
+let email_type_of_string str =
+  if String.length str >= 8 && String.sub str 0 8 = "campaign" then
+    (* Parse campaign emails: "campaign_type_instanceid" *)
+    let parts = String.split_on_char '_' str in
+    match parts with
+    | "campaign" :: campaign_type :: instance_id_str :: _ ->
+        let instance_id = int_of_string instance_id_str in
+        (* Default campaign values - in a real implementation these would be retrieved from DB *)
+        Campaign {
+          campaign_type;
+          instance_id;
+          respect_exclusions = true;
+          days_before_event = 30;
+          priority = 10;
+        }
+    | _ -> failwith ("Invalid campaign email type format: " ^ str)
+  else if String.length str >= 8 && String.sub str 0 8 = "followup" then
+    (* Parse followup emails: "followup_type" *)
+    let parts = String.split_on_char '_' str in
+    match parts with
+    | "followup" :: followup_parts ->
+        let followup_type_str = String.concat "_" followup_parts in
+        Followup (followup_type_of_string followup_type_str)
+    | _ -> failwith ("Invalid followup email type format: " ^ str)
+  else
+    (* Parse anniversary emails *)
+    Anniversary (anniversary_email_of_string str)
 
 let string_of_schedule_status = function
   | PreScheduled -> "pre-scheduled"

@@ -139,7 +139,7 @@ let test_golden_master () =
             status_str; skip_reason; priority_str; template_id; campaign_instance_str] ->
              {
                contact_id = int_of_string contact_id_str;
-               email_type = Anniversary Birthday; (* Simplified for demo *)
+               email_type = email_type_of_string email_type_str;
                scheduled_date = parse_date scheduled_date_str;
                scheduled_time = parse_time scheduled_time_str;
                status = (if status_str = "skipped" then Skipped skip_reason else PreScheduled);
