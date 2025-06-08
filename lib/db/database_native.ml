@@ -31,6 +31,31 @@ let get_db_connection () =
       with Sqlite3.Error msg ->
         Error (ConnectionError msg)
 
+(* Parse datetime from SQLite timestamp string *)
+let parse_datetime datetime_str =
+  if datetime_str = "" || datetime_str = "NULL" then
+    current_datetime ()
+  else
+    try
+      (* Handle common SQLite datetime formats: "YYYY-MM-DD HH:MM:SS" *)
+      match String.split_on_char ' ' datetime_str with
+      | [date_part; time_part] ->
+          let date = parse_date date_part in
+          let time_components = String.split_on_char ':' time_part in
+          (match time_components with
+           | [hour_str; minute_str; second_str] ->
+               let hour = int_of_string hour_str in
+               let minute = int_of_string minute_str in
+               let second = int_of_string (String.sub second_str 0 2) in (* Handle fractional seconds *)
+               make_datetime date (make_time hour minute second)
+           | _ -> current_datetime ())
+      | [date_part] ->
+          (* Date only, assume midnight *)
+          let date = parse_date date_part in
+          make_datetime date (make_time 0 0 0)
+      | _ -> current_datetime ()
+    with _ -> current_datetime ()
+
 (* Execute SQL with proper error handling *)
 let execute_sql_safe sql =
   match get_db_connection () with
@@ -765,3 +790,159 @@ let close_database () =
   | Some db ->
       ignore (Sqlite3.db_close db);
       db_handle := None 
+
+(* Campaign database functions *)
+
+(* Parse campaign_type_config from database row *)
+let parse_campaign_type_config_row = function
+  | [name; respect_exclusion_windows; enable_followups; days_before_event; target_all_contacts; priority; active; spread_evenly] ->
+      (try
+        Some {
+          name;
+          respect_exclusion_windows = (respect_exclusion_windows = "1");
+          enable_followups = (enable_followups = "1");
+          days_before_event = int_of_string days_before_event;
+          target_all_contacts = (target_all_contacts = "1");
+          priority = int_of_string priority;
+          active = (active = "1");
+          spread_evenly = (spread_evenly = "1");
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Parse campaign_instance from database row *)
+let parse_campaign_instance_row = function
+  | [id_str; campaign_type; instance_name; email_template; sms_template; active_start_date; active_end_date; spread_start_date; spread_end_date; metadata; created_at; updated_at] ->
+      (try
+        let id = int_of_string id_str in
+        let active_start_date_opt = 
+          if active_start_date = "" || active_start_date = "NULL" then None
+          else Some (parse_date active_start_date)
+        in
+        let active_end_date_opt = 
+          if active_end_date = "" || active_end_date = "NULL" then None
+          else Some (parse_date active_end_date)
+        in
+        let spread_start_date_opt = 
+          if spread_start_date = "" || spread_start_date = "NULL" then None
+          else Some (parse_date spread_start_date)
+        in
+        let spread_end_date_opt = 
+          if spread_end_date = "" || spread_end_date = "NULL" then None
+          else Some (parse_date spread_end_date)
+        in
+        let email_template_opt = if email_template = "" || email_template = "NULL" then None else Some email_template in
+        let sms_template_opt = if sms_template = "" || sms_template = "NULL" then None else Some sms_template in
+        let metadata_opt = if metadata = "" || metadata = "NULL" then None else Some metadata in
+        Some {
+          id;
+          campaign_type;
+          instance_name;
+          email_template = email_template_opt;
+          sms_template = sms_template_opt;
+          active_start_date = active_start_date_opt;
+          active_end_date = active_end_date_opt;
+          spread_start_date = spread_start_date_opt;
+          spread_end_date = spread_end_date_opt;
+          metadata = metadata_opt;
+          created_at = parse_datetime created_at;
+          updated_at = parse_datetime updated_at;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Parse contact_campaign from database row *)
+let parse_contact_campaign_row = function
+  | [id_str; contact_id_str; campaign_instance_id_str; trigger_date; status; metadata; created_at; updated_at] ->
+      (try
+        let id = int_of_string id_str in
+        let contact_id = int_of_string contact_id_str in
+        let campaign_instance_id = int_of_string campaign_instance_id_str in
+        let trigger_date_opt = 
+          if trigger_date = "" || trigger_date = "NULL" then None
+          else Some (parse_date trigger_date)
+        in
+        let metadata_opt = if metadata = "" || metadata = "NULL" then None else Some metadata in
+        Some {
+          id;
+          contact_id;
+          campaign_instance_id;
+          trigger_date = trigger_date_opt;
+          status;
+          metadata = metadata_opt;
+          created_at = parse_datetime created_at;
+          updated_at = parse_datetime updated_at;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Get active campaign instances for current date *)
+let get_active_campaign_instances () =
+  let today = current_date () in
+  let today_str = string_of_date today in
+  
+  let query = Printf.sprintf {|
+    SELECT id, campaign_type, instance_name, email_template, sms_template,
+           active_start_date, active_end_date, spread_start_date, spread_end_date,
+           metadata, created_at, updated_at
+    FROM campaign_instances
+    WHERE (active_start_date IS NULL OR active_start_date <= '%s')
+    AND (active_end_date IS NULL OR active_end_date >= '%s')
+    ORDER BY id
+  |} today_str today_str in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let instances = List.filter_map parse_campaign_instance_row rows in
+      Ok instances
+
+(* Get campaign type configuration *)
+let get_campaign_type_config campaign_type_name =
+  let query = Printf.sprintf {|
+    SELECT name, respect_exclusion_windows, enable_followups, days_before_event,
+           target_all_contacts, priority, active, spread_evenly
+    FROM campaign_types
+    WHERE name = '%s' AND active = 1
+  |} campaign_type_name in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok [row] ->
+      (match parse_campaign_type_config_row row with
+       | Some config -> Ok config
+       | None -> Error (ParseError "Invalid campaign type config"))
+  | Ok [] -> Error (ParseError "Campaign type not found")
+  | Ok _ -> Error (ParseError "Multiple campaign types found")
+
+(* Get contact campaigns for a specific campaign instance *)
+let get_contact_campaigns_for_instance campaign_instance_id =
+  let query = Printf.sprintf {|
+    SELECT id, contact_id, campaign_instance_id, trigger_date, status, metadata, created_at, updated_at
+    FROM contact_campaigns
+    WHERE campaign_instance_id = %d
+    AND status = 'pending'
+    ORDER BY contact_id
+  |} campaign_instance_id in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let contact_campaigns = List.filter_map parse_contact_campaign_row rows in
+      Ok contact_campaigns
+
+(* Get all contacts for "target_all_contacts" campaigns *)
+let get_all_contacts_for_campaign () =
+  let query = {|
+    SELECT id, email, zip_code, state, birth_date, effective_date
+    FROM contacts
+    WHERE email IS NOT NULL AND email != '' 
+    AND zip_code IS NOT NULL AND zip_code != ''
+    ORDER BY id
+  |} in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let contacts = List.filter_map parse_contact_row rows in
+      Ok contacts 

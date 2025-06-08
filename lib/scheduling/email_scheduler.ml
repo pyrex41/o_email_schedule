@@ -23,6 +23,118 @@ let create_context config total_contacts =
   let load_balancing_config = default_config total_contacts in
   { config; run_id; start_time; load_balancing_config }
 
+(* Calculate spread distribution for campaigns with spread_evenly=true *)
+let calculate_spread_date contact_id spread_start_date spread_end_date =
+  let start_date = spread_start_date in
+  let end_date = spread_end_date in
+  let total_days = diff_days end_date start_date + 1 in
+  
+  (* Use contact_id as seed for deterministic distribution *)
+  let hash_value = contact_id mod total_days in
+  add_days start_date hash_value
+
+let calculate_campaign_emails context campaign_instance campaign_config =
+  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+  let schedules = ref [] in
+  
+  (* Get contacts for this campaign *)
+  let contacts = 
+    if campaign_config.target_all_contacts then
+      match Database_native.get_all_contacts_for_campaign () with
+      | Ok contacts -> contacts
+      | Error _ -> []
+    else
+      match Database_native.get_contact_campaigns_for_instance campaign_instance.id with
+      | Ok contact_campaigns ->
+          (* Get the actual contact records for the contact_campaigns *)
+          List.filter_map (fun cc ->
+            (* This is a simplified approach - in practice, you'd batch fetch contacts *)
+            try
+              match Database_native.get_all_contacts () with
+              | Ok all_contacts -> 
+                  List.find_opt (fun c -> c.id = cc.contact_id) all_contacts
+              | Error _ -> None
+            with _ -> None
+          ) contact_campaigns
+      | Error _ -> []
+  in
+  
+  List.iter (fun contact ->
+    let scheduled_date = 
+      if campaign_config.spread_evenly then
+        match (campaign_instance.spread_start_date, campaign_instance.spread_end_date) with
+        | (Some start_date, Some end_date) ->
+            calculate_spread_date contact.id start_date end_date
+        | _ ->
+            (* Fallback to regular calculation if spread dates not set *)
+            let today = current_date () in
+            add_days today campaign_config.days_before_event
+      else
+        (* Regular campaign scheduling *)
+        let trigger_date = 
+          if campaign_config.target_all_contacts then
+            current_date () (* Use today as trigger for "all contacts" campaigns *)
+          else
+            (* Get trigger date from contact_campaigns table *)
+            match Database_native.get_contact_campaigns_for_instance campaign_instance.id with
+            | Ok contact_campaigns ->
+                (match List.find_opt (fun cc -> cc.contact_id = contact.id) contact_campaigns with
+                 | Some cc -> 
+                     (match cc.trigger_date with
+                      | Some date -> date
+                      | None -> current_date ())
+                 | None -> current_date ())
+            | Error _ -> current_date ()
+        in
+        add_days trigger_date campaign_config.days_before_event
+    in
+    
+    (* Create campaign email type *)
+    let campaign_email = {
+      campaign_type = campaign_config.name;
+      instance_id = campaign_instance.id;
+      respect_exclusions = campaign_config.respect_exclusion_windows;
+      days_before_event = campaign_config.days_before_event;
+      priority = campaign_config.priority;
+    } in
+    
+    let email_type = Campaign campaign_email in
+    
+    (* Check exclusion windows if required *)
+    let should_skip = 
+      if campaign_config.respect_exclusion_windows then
+        should_skip_email contact email_type scheduled_date
+      else
+        false
+    in
+    
+    let (status, skip_reason) = 
+      if should_skip then
+        let reason = match check_exclusion_window contact scheduled_date with
+          | Excluded { reason; _ } -> reason
+          | NotExcluded -> "Unknown exclusion"
+        in
+        (Skipped reason, reason)
+      else
+        (PreScheduled, "")
+    in
+    
+    let schedule = {
+      contact_id = contact.id;
+      email_type;
+      scheduled_date;
+      scheduled_time = send_time;
+      status;
+      priority = campaign_config.priority;
+      template_id = campaign_instance.email_template;
+      campaign_instance_id = Some campaign_instance.id;
+      scheduler_run_id = context.run_id;
+    } in
+    schedules := schedule :: !schedules
+  ) contacts;
+  
+  !schedules
+
 let calculate_anniversary_emails context contact =
   let today = current_date () in
   let schedules = ref [] in
@@ -105,25 +217,6 @@ let calculate_anniversary_emails context contact =
   | None -> ()
   end;
   
-  let today_month = today.month in
-  if today_month = 9 then (
-    let aep_date = make_date today.year 9 15 in
-    if not (should_skip_email contact (Anniversary AEP) aep_date) then (
-      let schedule = {
-        contact_id = contact.id;
-        email_type = Anniversary AEP;
-        scheduled_date = aep_date;
-        scheduled_time = send_time;
-        status = PreScheduled;
-        priority = priority_of_email_type (Anniversary AEP);
-        template_id = Some "aep_template";
-        campaign_instance_id = None;
-        scheduler_run_id = context.run_id;
-      } in
-      schedules := schedule :: !schedules
-    )
-  );
-  
   !schedules
 
 let calculate_post_window_emails context contact =
@@ -158,6 +251,26 @@ let calculate_schedules_for_contact context contact =
       Ok all_schedules
   with e ->
     Error (UnexpectedError e)
+
+(* New function to calculate all campaign schedules *)
+let calculate_all_campaign_schedules context =
+  let all_schedules = ref [] in
+  let errors = ref [] in
+  
+  match Database_native.get_active_campaign_instances () with
+  | Error err -> 
+      errors := (DatabaseError (Database_native.string_of_db_error err)) :: !errors;
+      (!all_schedules, !errors)
+  | Ok campaign_instances ->
+      List.iter (fun campaign_instance ->
+        match Database_native.get_campaign_type_config campaign_instance.campaign_type with
+        | Error err ->
+            errors := (DatabaseError (Database_native.string_of_db_error err)) :: !errors
+        | Ok campaign_config ->
+            let campaign_schedules = calculate_campaign_emails context campaign_instance campaign_config in
+            all_schedules := campaign_schedules @ !all_schedules
+      ) campaign_instances;
+      (!all_schedules, !errors)
 
 type batch_result = {
   schedules: email_schedule list;
@@ -202,6 +315,9 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
     let context = create_context config total_contacts in
     let chunk_size = config.batch_size in
     
+    (* First, calculate all campaign schedules *)
+    let (campaign_schedules, campaign_errors) = calculate_all_campaign_schedules context in
+    
     let rec process_chunks remaining_contacts acc_result =
       match remaining_contacts with
       | [] -> Ok acc_result
@@ -234,14 +350,38 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
       contacts_processed = 0;
       emails_scheduled = 0;
       emails_skipped = 0;
-      errors = [];
+      errors = campaign_errors; (* Include campaign errors from the start *)
     } in
     
     match process_chunks contacts initial_result with
     | Ok raw_result ->
-        begin match distribute_schedules raw_result.schedules context.load_balancing_config with
+        (* Combine anniversary schedules with campaign schedules *)
+        let all_schedules = raw_result.schedules @ campaign_schedules in
+        
+        (* Count campaign schedules for metrics *)
+        let campaign_scheduled = List.fold_left (fun acc schedule ->
+          match schedule.status with
+          | PreScheduled -> acc + 1
+          | _ -> acc
+        ) 0 campaign_schedules in
+        
+        let campaign_skipped = List.fold_left (fun acc schedule ->
+          match schedule.status with
+          | Skipped _ -> acc + 1
+          | _ -> acc
+        ) 0 campaign_schedules in
+        
+        let combined_result = {
+          schedules = all_schedules;
+          contacts_processed = raw_result.contacts_processed;
+          emails_scheduled = raw_result.emails_scheduled + campaign_scheduled;
+          emails_skipped = raw_result.emails_skipped + campaign_skipped;
+          errors = raw_result.errors;
+        } in
+        
+        begin match distribute_schedules combined_result.schedules context.load_balancing_config with
         | Ok balanced_schedules ->
-            Ok { raw_result with schedules = balanced_schedules }
+            Ok { combined_result with schedules = balanced_schedules }
         | Error err ->
             Error err
         end

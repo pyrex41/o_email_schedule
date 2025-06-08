@@ -6,7 +6,6 @@ type state =
 type anniversary_email = 
   | Birthday
   | EffectiveDate
-  | AEP
   | PostWindow
 
 type campaign_email = {
@@ -71,7 +70,6 @@ let string_of_state = function
 let string_of_anniversary_email = function
   | Birthday -> "birthday"
   | EffectiveDate -> "effective_date"
-  | AEP -> "aep"
   | PostWindow -> "post_window"
 
 let string_of_followup_type = function
@@ -95,7 +93,6 @@ let string_of_schedule_status = function
 let priority_of_email_type = function
   | Anniversary Birthday -> 10
   | Anniversary EffectiveDate -> 20
-  | Anniversary AEP -> 30
   | Anniversary PostWindow -> 40
   | Campaign c -> c.priority
   | Followup _ -> 50
@@ -131,6 +128,7 @@ type campaign_type_config = {
   target_all_contacts: bool;
   priority: int;
   active: bool;
+  spread_evenly: bool;
 }
 
 type campaign_instance = {
@@ -141,6 +139,8 @@ type campaign_instance = {
   sms_template: string option;
   active_start_date: Simple_date.date option;
   active_end_date: Simple_date.date option;
+  spread_start_date: Simple_date.date option;
+  spread_end_date: Simple_date.date option;
   metadata: string option; (* JSON string *)
   created_at: Simple_date.datetime;
   updated_at: Simple_date.datetime;
