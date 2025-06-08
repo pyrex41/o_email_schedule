@@ -6,6 +6,32 @@ open Date_time
 let db_handle = ref None
 let db_path = ref "org-206.sqlite3"
 
+(** 
+ * [set_db_path]: Sets the database file path for SQLite connections
+ * 
+ * Purpose:
+ *   Configures the SQLite database file location for all subsequent database
+ *   operations, enabling environment-specific database configuration.
+ * 
+ * Parameters:
+ *   - path: String path to SQLite database file
+ * 
+ * Returns:
+ *   Unit (side effect: updates global database path reference)
+ * 
+ * Business Logic:
+ *   - Updates global database path configuration
+ *   - Enables switching between development, test, and production databases
+ *   - Must be called before database operations in different environments
+ * 
+ * Usage Example:
+ *   Called during application initialization to set environment-specific database
+ * 
+ * Error Cases:
+ *   - None expected (simple reference assignment)
+ * 
+ * @integration_point
+ *)
 let set_db_path path = db_path := path
 
 (* Error handling with Result types *)
@@ -14,6 +40,32 @@ type db_error =
   | ParseError of string
   | ConnectionError of string
 
+(** 
+ * [string_of_db_error]: Converts database error to human-readable string
+ * 
+ * Purpose:
+ *   Provides standardized error message formatting for database errors
+ *   to enable consistent error reporting and debugging.
+ * 
+ * Parameters:
+ *   - db_error variant: Specific database error type
+ * 
+ * Returns:
+ *   String with formatted error message including error type
+ * 
+ * Business Logic:
+ *   - Categorizes errors for targeted debugging
+ *   - Provides clear error context for troubleshooting
+ *   - Enables consistent error handling across application
+ * 
+ * Usage Example:
+ *   Used in error reporting and logging throughout database operations
+ * 
+ * Error Cases:
+ *   - None expected (pure string formatting)
+ * 
+ * @integration_point
+ *)
 let string_of_db_error = function
   | SqliteError msg -> "SQLite error: " ^ msg
   | ParseError msg -> "Parse error: " ^ msg
@@ -298,39 +350,35 @@ type existing_schedule_record = {
   created_at: string;
 }
 
-(* Get existing schedules for comparison *)
-let get_existing_schedules_for_comparison () =
-  let query = {|
-    SELECT contact_id, email_type, scheduled_send_date, scheduled_send_time, 
-           status, skip_reason, batch_id, created_at
-    FROM email_schedules 
-    WHERE status IN ('pre-scheduled', 'scheduled', 'skipped')
-    ORDER BY contact_id, email_type
-  |} in
-  
-  match execute_sql_safe query with
-  | Error err -> Error err
-  | Ok rows ->
-      let existing_schedules = List.filter_map (fun row ->
-        match row with
-        | [contact_id_str; email_type; scheduled_date; scheduled_time; status; skip_reason_val; batch_id; created_at] ->
-            (try
-              Some ({
-                contact_id = int_of_string contact_id_str;
-                email_type = email_type;
-                scheduled_date = scheduled_date;
-                scheduled_time = scheduled_time;
-                status = status;
-                skip_reason = skip_reason_val;
-                scheduler_run_id = batch_id;
-                created_at = created_at;
-              } : existing_schedule_record)
-            with _ -> None)
-        | _ -> None
-      ) rows in
-      Ok existing_schedules
-
-(* Check if schedule content actually changed (ignoring metadata) *)
+(** 
+ * [schedule_content_changed]: Intelligently compares schedule content to detect real changes
+ * 
+ * Purpose:
+ *   Core smart update logic that determines if email schedule content has actually
+ *   changed, ignoring metadata to preserve audit trails and prevent unnecessary updates.
+ * 
+ * Parameters:
+ *   - existing_record: Existing schedule record from database
+ *   - new_schedule: New schedule to compare against existing
+ * 
+ * Returns:
+ *   Boolean indicating if content has meaningfully changed
+ * 
+ * Business Logic:
+ *   - Compares essential schedule fields: type, date, time, status, skip reason
+ *   - Ignores metadata fields like run_id and timestamps for audit preservation
+ *   - Logs preservation decisions for audit trail transparency
+ *   - Enables smart database updates that preserve history when appropriate
+ *   - Critical for maintaining scheduler run tracking across multiple executions
+ * 
+ * Usage Example:
+ *   Called by smart_batch_insert_schedules to determine update necessity
+ * 
+ * Error Cases:
+ *   - None expected (pure comparison logic)
+ * 
+ * @business_rule @performance
+ *)
 let schedule_content_changed existing_record (new_schedule : email_schedule) =
   let new_scheduled_date_str = string_of_date new_schedule.scheduled_date in
   let new_scheduled_time_str = string_of_time new_schedule.scheduled_time in
@@ -371,7 +419,38 @@ let find_existing_schedule existing_schedules (new_schedule : email_schedule) =
     existing.scheduled_date = new_scheduled_date_str
   ) existing_schedules
 
-(* Smart batch insert that preserves scheduler_run_id when content unchanged *)
+(** 
+ * [smart_batch_insert_schedules]: Intelligent bulk schedule update with audit preservation
+ * 
+ * Purpose:
+ *   Flagship smart update function that minimizes database operations by detecting
+ *   unchanged schedules and preserving their audit trails while updating only changed content.
+ * 
+ * Parameters:
+ *   - schedules: List of new email schedules to process
+ *   - current_run_id: Run identifier for new schedules
+ * 
+ * Returns:
+ *   Result containing number of processed records or database error
+ * 
+ * Business Logic:
+ *   - Retrieves all existing schedules for intelligent comparison
+ *   - Categorizes each schedule as new, changed, or unchanged
+ *   - INSERT for new schedules with current run_id
+ *   - UPDATE for changed schedules with current run_id and audit logging
+ *   - PRESERVE unchanged schedules with original run_id for audit continuity
+ *   - Uses single transaction for atomicity and performance
+ *   - Provides detailed metrics for monitoring and optimization
+ * 
+ * Usage Example:
+ *   Primary database update function called by scheduling orchestration
+ * 
+ * Error Cases:
+ *   - Database errors with automatic rollback for data consistency
+ *   - Comprehensive error logging for troubleshooting
+ * 
+ * @business_rule @performance @integration_point
+ *)
 let smart_batch_insert_schedules schedules current_run_id =
   if schedules = [] then Ok 0 else (
   
@@ -572,7 +651,36 @@ let restore_sqlite_safety () =
   in
   apply_pragmas safety_settings
 
-(* Ultra high-performance batch insert using prepared statements *)
+(** 
+ * [batch_insert_schedules_native]: Ultra high-performance batch insertion using prepared statements
+ * 
+ * Purpose:
+ *   Provides maximum performance bulk insertion using SQLite prepared statements
+ *   with aggressive optimizations for large-scale email schedule operations.
+ * 
+ * Parameters:
+ *   - schedules: List of email schedules to insert
+ * 
+ * Returns:
+ *   Result containing number of inserted records or database error
+ * 
+ * Business Logic:
+ *   - Applies performance optimizations before insertion
+ *   - Uses prepared statements for optimal SQL execution
+ *   - Processes schedules in single transaction for atomicity
+ *   - Converts schedule records to parameter arrays efficiently
+ *   - Handles event date calculations for database storage
+ *   - Restores safety settings after completion
+ * 
+ * Usage Example:
+ *   Used for large-scale schedule insertions during batch processing
+ * 
+ * Error Cases:
+ *   - Database errors with automatic safety restoration
+ *   - Transaction rollback on any failure
+ * 
+ * @performance @integration_point
+ *)
 let batch_insert_schedules_native schedules =
   if schedules = [] then Ok 0 else
   

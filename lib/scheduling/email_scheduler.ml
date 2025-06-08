@@ -13,6 +13,32 @@ type scheduling_context = {
   load_balancing_config: load_balancing_config;
 }
 
+(** 
+ * [generate_run_id]: Generates a unique run identifier for the current scheduling execution
+ * 
+ * Purpose:
+ *   Creates a timestamp-based unique identifier for tracking a specific scheduler run.
+ *   This ID is used to group all email schedules created during a single execution.
+ * 
+ * Parameters:
+ *   - None
+ * 
+ * Returns:
+ *   String in format "run_YYYYMMDD_HHMMSS" representing the current timestamp
+ * 
+ * Business Logic:
+ *   - Uses current datetime to ensure uniqueness across runs
+ *   - Provides audit trail for scheduled emails
+ *   - Enables tracking and debugging of specific scheduler executions
+ * 
+ * Usage Example:
+ *   Called by create_context when initializing scheduling context
+ * 
+ * Error Cases:
+ *   - None expected (system time should always be available)
+ * 
+ * @integration_point
+ *)
 let generate_run_id () =
   let now = current_datetime () in
   let (date, ((hour, minute, second), _)) = Ptime.to_date_time now in
@@ -20,13 +46,69 @@ let generate_run_id () =
   Printf.sprintf "run_%04d%02d%02d_%02d%02d%02d" 
     year month day hour minute second
 
+(** 
+ * [create_context]: Creates a complete scheduling context for the current run
+ * 
+ * Purpose:
+ *   Initializes all necessary components for email scheduling including configuration,
+ *   unique run ID, timing, and load balancing settings based on total contact count.
+ * 
+ * Parameters:
+ *   - config: Configuration object containing organization settings and email timing
+ *   - total_contacts: Total number of contacts to be processed for load balancing calculations
+ * 
+ * Returns:
+ *   scheduling_context record with all initialized components
+ * 
+ * Business Logic:
+ *   - Generates unique run ID for audit trail
+ *   - Captures start time for performance tracking
+ *   - Configures load balancing based on expected volume
+ *   - Ensures consistent context across all scheduling operations
+ * 
+ * Usage Example:
+ *   Called at the beginning of schedule_emails_streaming to initialize the session
+ * 
+ * Error Cases:
+ *   - None expected (all dependencies should be available)
+ * 
+ * @integration_point @state_machine
+ *)
 let create_context config total_contacts =
   let run_id = generate_run_id () in
   let start_time = current_datetime () in
   let load_balancing_config = default_config total_contacts in
   { config; run_id; start_time; load_balancing_config }
 
-(* Calculate spread distribution for campaigns with spread_evenly=true *)
+(** 
+ * [calculate_spread_date]: Calculates deterministic spread date for campaign emails
+ * 
+ * Purpose:
+ *   Distributes campaign emails evenly across a date range using contact ID as seed
+ *   to ensure consistent but scattered scheduling for campaigns with spread_evenly=true.
+ * 
+ * Parameters:
+ *   - contact_id: Unique contact identifier used as distribution seed
+ *   - spread_start_date: Start date of the spread period
+ *   - spread_end_date: End date of the spread period
+ * 
+ * Returns:
+ *   Date within the spread range, deterministically calculated for the contact
+ * 
+ * Business Logic:
+ *   - Uses modulo operation on contact_id for deterministic distribution
+ *   - Ensures each contact gets the same date on subsequent runs
+ *   - Spreads load evenly across the available date range
+ *   - Prevents clustering of campaign emails on specific dates
+ * 
+ * Usage Example:
+ *   Called by calculate_campaign_emails when campaign_config.spread_evenly is true
+ * 
+ * Error Cases:
+ *   - None expected (valid date range assumed to be provided)
+ * 
+ * @business_rule @performance
+ *)
 let calculate_spread_date contact_id spread_start_date spread_end_date =
   let start_date = spread_start_date in
   let end_date = spread_end_date in
@@ -36,7 +118,35 @@ let calculate_spread_date contact_id spread_start_date spread_end_date =
   let hash_value = contact_id mod total_days in
   add_days start_date hash_value
 
-(* Check if contact should be excluded based on organization settings and campaign config *)
+(** 
+ * [should_exclude_contact]: Determines if contact should be excluded from campaign
+ * 
+ * Purpose:
+ *   Evaluates organization-level and campaign-specific exclusion rules for failed
+ *   underwriting contacts to ensure compliance with business policies.
+ * 
+ * Parameters:
+ *   - config: Configuration containing organization exclusion settings
+ *   - campaign_config: Campaign-specific configuration including exclusion rules
+ *   - contact: Contact record with failed_underwriting flag
+ * 
+ * Returns:
+ *   Option string - Some exclusion_reason if excluded, None if allowed
+ * 
+ * Business Logic:
+ *   - Checks global organization policy for failed underwriting exclusion
+ *   - Allows AEP campaigns even for failed underwriting when globally excluded
+ *   - Respects campaign-specific failed underwriting skip settings
+ *   - Provides specific exclusion reasons for audit purposes
+ * 
+ * Usage Example:
+ *   Called by calculate_campaign_emails to filter contacts before scheduling
+ * 
+ * Error Cases:
+ *   - None expected (all inputs should be valid)
+ * 
+ * @business_rule
+ *)
 let should_exclude_contact config campaign_config contact =
   (* Check global underwriting exclusion *)
   if config.organization.exclude_failed_underwriting_global && contact.failed_underwriting then
@@ -50,7 +160,36 @@ let should_exclude_contact config campaign_config contact =
   else
     None
 
-(* Check if contact is valid for scheduling with enhanced logic *)
+(** 
+ * [is_contact_valid_for_scheduling]: Validates contact eligibility for campaign scheduling
+ * 
+ * Purpose:
+ *   Determines if a contact has sufficient data for campaign scheduling based on
+ *   email validity and location targeting requirements.
+ * 
+ * Parameters:
+ *   - config: Configuration containing organization policies
+ *   - campaign_instance: Campaign instance with targeting constraints
+ *   - contact: Contact record with email, zip_code, and state information
+ * 
+ * Returns:
+ *   Boolean indicating if contact is valid for this campaign
+ * 
+ * Business Logic:
+ *   - Requires valid email address for all campaigns
+ *   - Checks if campaign has targeting constraints (states/carriers)
+ *   - For targeted campaigns, requires location data (zip or state)
+ *   - For universal campaigns, respects organization policy on missing location data
+ *   - Handles "ALL" targeting as universal campaigns
+ * 
+ * Usage Example:
+ *   Called by calculate_campaign_emails to validate each contact
+ * 
+ * Error Cases:
+ *   - Returns false for contacts with missing required data
+ * 
+ * @business_rule @data_flow
+ *)
 let is_contact_valid_for_scheduling config campaign_instance contact =
   (* Basic email validation *)
   if contact.email = "" then
@@ -71,7 +210,35 @@ let is_contact_valid_for_scheduling config campaign_instance contact =
       (* Universal campaign - send even without zip code if org allows *)
       config.organization.send_without_zipcode_for_universal
 
-(* Enhanced effective date validation with configurable timing *)
+(** 
+ * [should_send_effective_date_email]: Determines if effective date email should be sent
+ * 
+ * Purpose:
+ *   Evaluates whether sufficient time has passed since a contact's effective date
+ *   to warrant sending anniversary emails based on organization configuration.
+ * 
+ * Parameters:
+ *   - config: Configuration containing effective_date_first_email_months setting
+ *   - _contact: Contact record (currently unused but preserved for future use)
+ *   - effective_date: The contact's insurance effective date
+ * 
+ * Returns:
+ *   Boolean indicating if effective date email should be sent
+ * 
+ * Business Logic:
+ *   - Calculates months elapsed since effective date
+ *   - Compares against organization minimum threshold
+ *   - Prevents emails too soon after policy inception
+ *   - Ensures regulatory compliance with timing requirements
+ * 
+ * Usage Example:
+ *   Called by calculate_anniversary_emails before scheduling effective date anniversaries
+ * 
+ * Error Cases:
+ *   - None expected (date calculations should be valid)
+ * 
+ * @business_rule
+ *)
 let should_send_effective_date_email config _contact effective_date =
   let today = current_date () in
   let (today_year, today_month, _) = today in
@@ -85,6 +252,38 @@ let should_send_effective_date_email config _contact effective_date =
   (* Only send if we've passed the minimum months threshold *)
   months_since_effective >= config.organization.effective_date_first_email_months
 
+(** 
+ * [calculate_campaign_emails]: Generates email schedules for a specific campaign instance
+ * 
+ * Purpose:
+ *   Core campaign scheduling logic that processes all eligible contacts for a campaign,
+ *   applies business rules, handles exclusions, and creates email schedule records.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration and load balancing settings
+ *   - campaign_instance: Specific campaign instance with targeting and timing data
+ *   - campaign_config: Campaign type configuration with rules and settings
+ * 
+ * Returns:
+ *   List of email_schedule records for all processed contacts in this campaign
+ * 
+ * Business Logic:
+ *   - Retrieves contacts based on campaign targeting (all contacts vs specific list)
+ *   - Validates each contact for campaign eligibility
+ *   - Applies organization and campaign exclusion rules
+ *   - Calculates schedule dates (spread evenly vs regular timing)
+ *   - Handles exclusion windows if campaign respects them
+ *   - Creates appropriate schedule status (PreScheduled vs Skipped)
+ * 
+ * Usage Example:
+ *   Called by calculate_all_campaign_schedules for each active campaign instance
+ * 
+ * Error Cases:
+ *   - Database errors when retrieving contacts return empty lists
+ *   - Invalid contacts are skipped with Skipped status
+ * 
+ * @business_rule @data_flow @performance
+ *)
 let calculate_campaign_emails context campaign_instance campaign_config =
   let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
   let schedules = ref [] in
@@ -214,7 +413,37 @@ let calculate_campaign_emails context campaign_instance campaign_config =
   
   !schedules
 
-(* Enhanced anniversary email calculation with organization config *)
+(** 
+ * [calculate_anniversary_emails]: Generates anniversary email schedules for a contact
+ * 
+ * Purpose:
+ *   Creates email schedules for birthday and effective date anniversaries based on
+ *   contact data and organization configuration, applying exclusion rules.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration and timing settings
+ *   - contact: Contact record with birthday, effective_date, and other data
+ * 
+ * Returns:
+ *   List of email_schedule records for anniversary emails (birthday and effective date)
+ * 
+ * Business Logic:
+ *   - Checks organization-level failed underwriting exclusion policy
+ *   - Calculates next anniversary dates for birthday and effective date
+ *   - Applies days_before configuration for email timing
+ *   - Evaluates exclusion windows and creates appropriate status
+ *   - Handles minimum time threshold for effective date emails
+ *   - Creates audit trail with skip reasons when applicable
+ * 
+ * Usage Example:
+ *   Called by calculate_schedules_for_contact for each valid contact
+ * 
+ * Error Cases:
+ *   - Missing birthday/effective_date are handled gracefully (no emails created)
+ *   - Exclusion window checks may result in Skipped status
+ * 
+ * @business_rule @data_flow
+ *)
 let calculate_anniversary_emails context contact =
   let today = current_date () in
   let schedules = ref [] in
@@ -307,7 +536,35 @@ let calculate_anniversary_emails context contact =
     !schedules
   )
 
-(* Enhanced post-window email calculation with organization config *)
+(** 
+ * [calculate_post_window_emails]: Generates post-exclusion window email schedules
+ * 
+ * Purpose:
+ *   Creates email schedules for contacts who had emails skipped during exclusion
+ *   windows, to be sent after the window period ends.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration settings
+ *   - contact: Contact record that may need post-window emails
+ * 
+ * Returns:
+ *   List containing single post-window email schedule or empty list
+ * 
+ * Business Logic:
+ *   - Checks if organization enables post-window email feature
+ *   - Retrieves calculated post-window date from exclusion logic
+ *   - Creates single email schedule with PostWindow anniversary type
+ *   - Uses standard send time and priority settings
+ * 
+ * Usage Example:
+ *   Called by calculate_schedules_for_contact for contacts with exclusion history
+ * 
+ * Error Cases:
+ *   - Returns empty list if organization disables feature
+ *   - Returns empty list if no post-window date calculated
+ * 
+ * @business_rule
+ *)
 let calculate_post_window_emails context contact =
   (* Check if organization enables post-window emails *)
   if not context.config.organization.enable_post_window_emails then
@@ -330,6 +587,36 @@ let calculate_post_window_emails context contact =
         [schedule]
     | None -> []
 
+(** 
+ * [calculate_schedules_for_contact]: Generates all email schedules for a single contact
+ * 
+ * Purpose:
+ *   Core scheduling function that determines which emails should be sent to a contact
+ *   and when, based on their anniversaries, state rules, and organization policies.
+ * 
+ * Parameters:
+ *   - context: Scheduling context containing config, run_id, and load balancing settings
+ *   - contact: The contact record with birthday, effective_date, state, etc.
+ * 
+ * Returns:
+ *   Result containing list of email_schedule records or scheduler_error
+ * 
+ * Business Logic:
+ *   - Validates contact has required data for anniversary scheduling
+ *   - Calculates anniversary-based emails (birthday, effective_date)
+ *   - Applies state exclusion windows based on contact.state
+ *   - Adds post-window emails if any were skipped
+ *   - Respects organization configuration for timing and exclusions
+ * 
+ * Usage Example:
+ *   Called by process_contact_batch for each contact in batch processing
+ * 
+ * Error Cases:
+ *   - InvalidContactData: Missing required fields or validation failure
+ *   - UnexpectedError: Unhandled exceptions during processing
+ * 
+ * @business_rule @data_flow
+ *)
 let calculate_schedules_for_contact context contact =
   try
     if not (Contact.is_valid_for_anniversary_scheduling context.config.organization contact) then
@@ -345,7 +632,35 @@ let calculate_schedules_for_contact context contact =
   with e ->
     Error (UnexpectedError e)
 
-(* New function to calculate all campaign schedules *)
+(** 
+ * [calculate_all_campaign_schedules]: Generates schedules for all active campaigns
+ * 
+ * Purpose:
+ *   Orchestrates campaign email scheduling across all active campaign instances,
+ *   retrieving configurations and handling errors at the campaign level.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration and settings
+ * 
+ * Returns:
+ *   Tuple of (schedule_list, error_list) containing all campaign schedules and any errors
+ * 
+ * Business Logic:
+ *   - Retrieves all active campaign instances from database
+ *   - For each instance, gets campaign type configuration
+ *   - Calls calculate_campaign_emails for schedule generation
+ *   - Accumulates all schedules and errors for return
+ *   - Continues processing even if individual campaigns fail
+ * 
+ * Usage Example:
+ *   Called by schedule_emails_streaming to handle all campaign scheduling
+ * 
+ * Error Cases:
+ *   - Database errors accessing campaigns are collected and returned
+ *   - Individual campaign failures don't stop overall processing
+ * 
+ * @integration_point @data_flow
+ *)
 let calculate_all_campaign_schedules context =
   let all_schedules = ref [] in
   let errors = ref [] in
@@ -373,6 +688,36 @@ type batch_result = {
   errors: scheduler_error list;
 }
 
+(** 
+ * [process_contact_batch]: Processes a batch of contacts for anniversary email scheduling
+ * 
+ * Purpose:
+ *   Efficiently processes a subset of contacts in parallel, calculating schedules
+ *   and collecting metrics for batch processing performance optimization.
+ * 
+ * Parameters:
+ *   - context: Scheduling context with configuration and run information
+ *   - contacts: List of contacts to process in this batch
+ * 
+ * Returns:
+ *   batch_result record containing schedules, metrics, and any errors encountered
+ * 
+ * Business Logic:
+ *   - Processes each contact individually for anniversary scheduling
+ *   - Accumulates all generated schedules from the batch
+ *   - Tracks processing metrics (scheduled, skipped, errors)
+ *   - Continues processing even if individual contacts fail
+ *   - Provides detailed statistics for monitoring and debugging
+ * 
+ * Usage Example:
+ *   Called by schedule_emails_streaming for each chunk of contacts
+ * 
+ * Error Cases:
+ *   - Individual contact errors are collected but don't stop batch processing
+ *   - Returns comprehensive metrics even when some contacts fail
+ * 
+ * @performance @data_flow
+ *)
 let process_contact_batch context contacts =
   let all_schedules = ref [] in
   let contacts_processed = ref 0 in
@@ -403,6 +748,38 @@ let process_contact_batch context contacts =
     errors = !errors;
   }
 
+(** 
+ * [schedule_emails_streaming]: Main orchestration function for email scheduling
+ * 
+ * Purpose:
+ *   Top-level function that coordinates all email scheduling including anniversary
+ *   emails, campaigns, load balancing, and provides comprehensive execution results.
+ * 
+ * Parameters:
+ *   - contacts: List of all contacts to process for anniversary emails
+ *   - config: Configuration containing organization settings and timing
+ *   - total_contacts: Total contact count for load balancing calculations
+ * 
+ * Returns:
+ *   Result containing batch_result with all schedules and metrics, or scheduler_error
+ * 
+ * Business Logic:
+ *   - Creates scheduling context with run ID and load balancing config
+ *   - Processes campaign schedules first (independent of contact batching)
+ *   - Processes anniversary contacts in configurable batch sizes
+ *   - Combines anniversary and campaign schedules
+ *   - Applies load balancing distribution to final schedules
+ *   - Provides comprehensive metrics and error reporting
+ * 
+ * Usage Example:
+ *   Main entry point called by external scheduler with full contact list
+ * 
+ * Error Cases:
+ *   - Database errors, validation failures, unexpected exceptions
+ *   - Returns detailed error information for debugging
+ * 
+ * @integration_point @state_machine @performance
+ *)
 let schedule_emails_streaming ~contacts ~config ~total_contacts =
   try
     let context = create_context config total_contacts in
@@ -483,6 +860,33 @@ let schedule_emails_streaming ~contacts ~config ~total_contacts =
   with e ->
     Error (UnexpectedError e)
 
+(** 
+ * [get_scheduling_summary]: Generates human-readable summary of scheduling results
+ * 
+ * Purpose:
+ *   Creates formatted summary text with key metrics and distribution analysis
+ *   for monitoring, logging, and administrative reporting purposes.
+ * 
+ * Parameters:
+ *   - result: batch_result containing schedules and processing metrics
+ * 
+ * Returns:
+ *   Formatted string with comprehensive scheduling statistics
+ * 
+ * Business Logic:
+ *   - Analyzes email distribution across dates for load balancing insights
+ *   - Calculates averages, maximums, and variance for capacity planning
+ *   - Provides contact processing metrics for performance monitoring
+ *   - Formats data in human-readable format for reports and logs
+ * 
+ * Usage Example:
+ *   Called after schedule_emails_streaming completes for logging and reporting
+ * 
+ * Error Cases:
+ *   - None expected (operates on already validated result data)
+ * 
+ * @integration_point
+ *)
 let get_scheduling_summary result =
   let analysis = analyze_distribution result.schedules in
   Printf.sprintf 
