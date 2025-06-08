@@ -98,13 +98,18 @@ export AWS_REGION="auto"
 if command -v aws >/dev/null 2>&1; then
     TIGRIS_DB_PATH="s3://$TIGRIS_BUCKET/org-data/$ORG_ID.db"
     
-    # Get credentials from flyctl if possible
-    if AWS_ACCESS_KEY_ID=$(flyctl secrets list 2>/dev/null | grep AWS_ACCESS_KEY_ID | awk '{print $2}' 2>/dev/null); then
-        export AWS_ACCESS_KEY_ID
-    fi
-    
-    if AWS_SECRET_ACCESS_KEY=$(flyctl secrets list 2>/dev/null | grep AWS_SECRET_ACCESS_KEY | awk '{print $2}' 2>/dev/null); then
-        export AWS_SECRET_ACCESS_KEY
+    # Note: flyctl secrets list only shows masked values, not actual credentials
+    # User must configure AWS CLI manually with their Tigris credentials
+    echo "⚠️  Please ensure your AWS CLI is configured with Tigris credentials:"
+    echo "   aws configure set aws_access_key_id 'tid_xxxxx'"
+    echo "   aws configure set aws_secret_access_key 'tsec_xxxxx'"
+    echo "   Or set environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+    echo ""
+    read -p "Have you configured AWS CLI with your Tigris credentials? (y/N): " AWS_CONFIGURED
+    if [[ ! $AWS_CONFIGURED =~ ^[Yy]$ ]]; then
+        echo "❌ Please configure AWS CLI with Tigris credentials first"
+        echo "   You can find your credentials at: https://fly.io/dashboard/personal/tokens"
+        exit 1
     fi
     
     if aws s3 cp "$LOCAL_DB_PATH" "$TIGRIS_DB_PATH" --endpoint-url "$AWS_ENDPOINT_URL_S3"; then
