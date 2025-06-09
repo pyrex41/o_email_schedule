@@ -420,6 +420,78 @@ let find_existing_schedule existing_schedules (new_schedule : email_schedule) =
   ) existing_schedules
 
 (** 
+ * [get_existing_schedules_for_comparison]: Retrieves all existing schedules for intelligent comparison
+ * 
+ * Purpose:
+ *   Fetches existing email schedules from database to enable smart update logic
+ *   that can detect unchanged content and preserve audit trails.
+ * 
+ * Returns:
+ *   Result containing list of existing_schedule_record or database error
+ * 
+ * Business Logic:
+ *   - Retrieves all pre-scheduled and scheduled email records
+ *   - Excludes already sent/delivered emails to focus on updatable schedules
+ *   - Provides data for smart comparison and audit trail preservation
+ * 
+ * @performance @integration_point
+ *)
+let get_existing_schedules_for_comparison () =
+  let query = {|
+    SELECT contact_id, email_type, scheduled_send_date, scheduled_send_time, 
+           status, COALESCE(skip_reason, '') as skip_reason, 
+           COALESCE(batch_id, '') as scheduler_run_id,
+           COALESCE(created_at, '') as created_at
+    FROM email_schedules 
+    WHERE status IN ('pre-scheduled', 'scheduled', 'skipped')
+    ORDER BY contact_id, email_type, scheduled_send_date
+  |} in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let records = List.map (fun row ->
+        match row with
+        | [contact_id_str; email_type; scheduled_date; scheduled_time; status; skip_reason; scheduler_run_id; created_at] ->
+            (try
+              {
+                contact_id = int_of_string contact_id_str;
+                email_type;
+                scheduled_date;
+                scheduled_time;
+                status;
+                skip_reason;
+                scheduler_run_id;
+                created_at;
+              }
+            with _ -> 
+              (* Default record for parsing errors - will be filtered out by comparison logic *)
+              {
+                contact_id = 0;
+                email_type = "";
+                scheduled_date = "";
+                scheduled_time = "";
+                status = "";
+                skip_reason = "";
+                scheduler_run_id = "";
+                created_at = "";
+              })
+        | _ -> 
+            (* Default record for malformed rows *)
+            {
+              contact_id = 0;
+              email_type = "";
+              scheduled_date = "";
+              scheduled_time = "";
+              status = "";
+              skip_reason = "";
+              scheduler_run_id = "";
+              created_at = "";
+            }
+      ) rows in
+      Ok records
+
+(** 
  * [smart_batch_insert_schedules]: Intelligent bulk schedule update with audit preservation
  * 
  * Purpose:
@@ -492,7 +564,6 @@ let smart_batch_insert_schedules schedules current_run_id =
               let (event_year, event_month, event_day) = match schedule.email_type with
                 | Anniversary Birthday -> (current_year, 1, 1)
                 | Anniversary EffectiveDate -> (current_year, 1, 2)
-                | Anniversary AEP -> (current_year, 9, 15)
                 | _ -> (current_year, 1, 1)
               in
               
@@ -715,7 +786,6 @@ let batch_insert_schedules_native schedules =
         let (event_year, event_month, event_day) = match schedule.email_type with
           | Anniversary Birthday -> (current_year, 1, 1)
           | Anniversary EffectiveDate -> (current_year, 1, 2)
-          | Anniversary AEP -> (current_year, 9, 15)
           | _ -> (current_year, 1, 1)
         in
         
@@ -780,7 +850,6 @@ let batch_insert_schedules_transactional schedules =
           let (event_year, event_month, event_day) = match schedule.email_type with
             | Anniversary Birthday -> (current_year, 1, 1)
             | Anniversary EffectiveDate -> (current_year, 1, 2)
-            | Anniversary AEP -> (current_year, 9, 15)
             | _ -> (current_year, 1, 1)
           in
           
@@ -907,7 +976,8 @@ let get_sent_emails_for_followup lookback_days =
     FROM email_schedules 
     WHERE status IN ('sent', 'delivered')
     AND scheduled_send_date >= '%s'
-    AND email_type IN ('birthday', 'effective_date', 'aep')
+    AND (email_type IN ('birthday', 'effective_date', 'post_window')
+         OR email_type LIKE 'campaign_%%')
     ORDER BY contact_id, sent_time DESC
   |} (string_of_date lookback_date) in
   
@@ -973,8 +1043,52 @@ let ensure_performance_indexes () =
 
 (* Initialize database and ensure schema *)
 let initialize_database () =
+  (* Ensure AEP campaign type exists *)
+  let ensure_aep_campaign () =
+    let check_aep_query = "SELECT COUNT(*) FROM campaign_types WHERE name = 'aep'" in
+    match execute_sql_safe check_aep_query with
+    | Ok [["0"]] ->
+        (* AEP campaign doesn't exist, create it *)
+        let insert_aep_sql = {|
+          INSERT INTO campaign_types (
+            name, respect_exclusion_windows, enable_followups, days_before_event,
+            target_all_contacts, priority, active, spread_evenly, skip_failed_underwriting
+          ) VALUES (
+            'aep', 1, 1, 30, 1, 30, 1, 0, 0
+          )
+        |} in
+        execute_sql_no_result insert_aep_sql
+    | Ok _ -> Ok () (* AEP already exists *)
+    | Error err -> Error err
+  in
+
+  (* Ensure default AEP campaign instance exists *)
+  let ensure_aep_instance () =
+    let check_instance_query = "SELECT COUNT(*) FROM campaign_instances WHERE campaign_type = 'aep'" in
+    match execute_sql_safe check_instance_query with
+    | Ok [["0"]] ->
+        (* No AEP instance exists, create default one *)
+        let insert_instance_sql = {|
+          INSERT INTO campaign_instances (
+            campaign_type, instance_name, email_template, sms_template,
+            active_start_date, active_end_date, spread_start_date, spread_end_date,
+            target_states, target_carriers, metadata, created_at, updated_at
+          ) VALUES (
+            'aep', 'aep_default', 'aep_template', 'aep_sms_template',
+            NULL, NULL, NULL, NULL, 'ALL', 'ALL', '{}',
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+        |} in
+        execute_sql_no_result insert_instance_sql
+    | Ok _ -> Ok () (* AEP instance already exists *)
+    | Error err -> Error err
+  in
+
   match ensure_performance_indexes () with
-  | Ok () -> Ok ()
+  | Ok () -> 
+      (match ensure_aep_campaign () with
+       | Ok () -> ensure_aep_instance ()
+       | Error err -> Error err)
   | Error err -> Error err
 
 (* Close database connection *)

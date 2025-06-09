@@ -6,7 +6,6 @@ type state =
 type anniversary_email = 
   | Birthday
   | EffectiveDate
-  | AEP
   | PostWindow
 
 type campaign_email = {
@@ -73,13 +72,11 @@ let string_of_state = function
 let string_of_anniversary_email = function
   | Birthday -> "birthday"
   | EffectiveDate -> "effective_date"
-  | AEP -> "aep"
   | PostWindow -> "post_window"
 
 let anniversary_email_of_string = function
   | "birthday" -> Birthday
   | "effective_date" -> EffectiveDate
-  | "aep" -> AEP
   | "post_window" -> PostWindow
   | s -> failwith ("Unknown anniversary email type: " ^ s)
 
@@ -139,7 +136,6 @@ let string_of_schedule_status = function
 let priority_of_email_type = function
   | Anniversary Birthday -> 10
   | Anniversary EffectiveDate -> 20
-  | Anniversary AEP -> 30
   | Anniversary PostWindow -> 40
   | Campaign c -> c.priority
   | Followup _ -> 50
