@@ -1080,53 +1080,7 @@ let calculate_followup_emails context =
       
              !schedules
 
-(** 
- * [check_frequency_limits]: Checks if contact exceeds email frequency limits
- * 
- * Purpose:
- *   Enforces maximum emails per period limits to prevent overwhelming contacts
- *   and ensures compliance with organization email frequency policies.
- * 
- * Parameters:
- *   - context: Scheduling context with frequency limit configuration
- *   - contact_id: Contact to check frequency limits for
- *   - proposed_date: Date for which to schedule the new email
- * 
- * Returns:
- *   Result containing boolean (true if within limits) or scheduler_error
- * 
- * Business Logic:
- *   - Counts emails sent/scheduled within the configured period
- *   - Compares against max_emails_per_period configuration
- *   - Excludes skipped emails from count
- *   - Provides specific limit exceeded reason
- * 
- * @business_rule
- *)
-let check_frequency_limits context contact_id proposed_date =
-  let period_start = add_days proposed_date (-context.config.period_days) in
-  let period_start_str = string_of_date period_start in
-  let proposed_date_str = string_of_date proposed_date in
-  
-  let count_query = Printf.sprintf {|
-    SELECT COUNT(*) 
-    FROM email_schedules 
-    WHERE contact_id = %d 
-    AND scheduled_send_date BETWEEN '%s' AND '%s'
-    AND status IN ('pre-scheduled', 'scheduled', 'sent', 'delivered')
-  |} contact_id period_start_str proposed_date_str in
-  
-  match execute_sql_safe count_query with
-  | Error err -> Error (DatabaseError (string_of_db_error err))
-  | Ok [[ count_str ]] ->
-      (try
-        let current_count = int_of_string count_str in
-        if current_count >= context.config.max_emails_per_period then
-          Ok false (* Exceeds limit *)
-        else
-          Ok true (* Within limit *)
-      with _ -> Error (ValidationError "Invalid email count from database"))
-  | Ok _ -> Error (ValidationError "Invalid frequency check result")
+
 
 (** 
  * [apply_frequency_limits]: Filters email schedules based on frequency limits
@@ -1145,6 +1099,8 @@ let check_frequency_limits context contact_id proposed_date =
  * Business Logic:
  *   - Groups schedules by contact_id for frequency checking
  *   - Sorts schedules by priority (lower number = higher priority)
+ *   - For each email, counts both database emails AND current batch emails within period
+ *   - Tracks previously-allowed emails from current batch to prevent batch-level limit violations
  *   - Allows highest priority emails within frequency limits
  *   - Marks excess emails as skipped due to frequency limits
  * 
@@ -1168,21 +1124,62 @@ let apply_frequency_limits context schedules =
     (* Sort by priority (lower number = higher priority) *)
     let sorted_schedules : email_schedule list = List.sort (fun (a : email_schedule) (b : email_schedule) -> compare a.priority b.priority) contact_schedules in
     
+    (* Track emails we've already allowed for this contact in current batch *)
+    let allowed_in_batch = ref [] in
+    
     List.iter (fun (schedule : email_schedule) ->
-      match check_frequency_limits context contact_id schedule.scheduled_date with
+      (* Calculate period for this email *)
+      let period_start = add_days schedule.scheduled_date (-context.config.period_days) in
+      let period_start_str = string_of_date period_start in
+      let proposed_date_str = string_of_date schedule.scheduled_date in
+      
+      (* Count emails from database *)
+      let count_query = Printf.sprintf {|
+        SELECT COUNT(*) 
+        FROM email_schedules 
+        WHERE contact_id = %d 
+        AND scheduled_send_date BETWEEN '%s' AND '%s'
+        AND status IN ('pre-scheduled', 'scheduled', 'sent', 'delivered')
+      |} contact_id period_start_str proposed_date_str in
+      
+      match execute_sql_safe count_query with
       | Error _ -> 
           (* On error, allow the email (conservative approach) *)
-          allowed_schedules := schedule :: !allowed_schedules
-      | Ok within_limits ->
-          if within_limits then
-            allowed_schedules := schedule :: !allowed_schedules
-          else
-            (* Create skipped version due to frequency limits *)
-            let limited_schedule = {
-              schedule with 
-              status = Skipped "Frequency limit exceeded";
-            } in
-            limited_schedules := limited_schedule :: !limited_schedules
+          allowed_schedules := schedule :: !allowed_schedules;
+          allowed_in_batch := schedule :: !allowed_in_batch
+      | Ok [[ count_str ]] ->
+          (try
+            let db_count = int_of_string count_str in
+            
+            (* Count emails from current batch that fall within this period *)
+            let batch_count = List.fold_left (fun acc (batch_schedule : email_schedule) ->
+              if batch_schedule.scheduled_date >= period_start && 
+                 batch_schedule.scheduled_date <= schedule.scheduled_date then
+                acc + 1
+              else
+                acc
+            ) 0 !allowed_in_batch in
+            
+            let total_count = db_count + batch_count in
+            
+            if total_count >= context.config.max_emails_per_period then
+              (* Create skipped version due to frequency limits *)
+              let limited_schedule = {
+                schedule with 
+                status = Skipped "Frequency limit exceeded";
+              } in
+              limited_schedules := limited_schedule :: !limited_schedules
+            else
+              allowed_schedules := schedule :: !allowed_schedules;
+              allowed_in_batch := schedule :: !allowed_in_batch
+          with _ -> 
+            (* On parse error, allow the email (conservative approach) *)
+            allowed_schedules := schedule :: !allowed_schedules;
+            allowed_in_batch := schedule :: !allowed_in_batch)
+      | Ok _ -> 
+          (* On unexpected result, allow the email (conservative approach) *)
+          allowed_schedules := schedule :: !allowed_schedules;
+          allowed_in_batch := schedule :: !allowed_in_batch
     ) sorted_schedules
   ) contact_groups;
   
