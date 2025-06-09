@@ -33,8 +33,13 @@
   logs
   alcotest
   bisect_ppx
-  ctypes)
+  ctypes
+  ppxlib
+  ocamlgraph
+  re
+  fmt
+  cmdliner)
  (tags
-  (email scheduling "business rules" campaigns)))
+  (email scheduling "business rules" campaigns visualization)))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

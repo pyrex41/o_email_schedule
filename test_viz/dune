@@ -1,0 +1,7 @@
+(executable
+ (public_name test_core_visualizer)
+ (name test_core_visualizer)
+ (libraries
+  scheduler.visualizer
+  unix
+  yojson))
