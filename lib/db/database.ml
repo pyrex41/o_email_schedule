@@ -420,6 +420,78 @@ let find_existing_schedule existing_schedules (new_schedule : email_schedule) =
   ) existing_schedules
 
 (** 
+ * [get_existing_schedules_for_comparison]: Retrieves all existing schedules for intelligent comparison
+ * 
+ * Purpose:
+ *   Fetches existing email schedules from database to enable smart update logic
+ *   that can detect unchanged content and preserve audit trails.
+ * 
+ * Returns:
+ *   Result containing list of existing_schedule_record or database error
+ * 
+ * Business Logic:
+ *   - Retrieves all pre-scheduled and scheduled email records
+ *   - Excludes already sent/delivered emails to focus on updatable schedules
+ *   - Provides data for smart comparison and audit trail preservation
+ * 
+ * @performance @integration_point
+ *)
+let get_existing_schedules_for_comparison () =
+  let query = {|
+    SELECT contact_id, email_type, scheduled_send_date, scheduled_send_time, 
+           status, COALESCE(skip_reason, '') as skip_reason, 
+           COALESCE(batch_id, '') as scheduler_run_id,
+           COALESCE(created_at, '') as created_at
+    FROM email_schedules 
+    WHERE status IN ('pre-scheduled', 'scheduled', 'skipped')
+    ORDER BY contact_id, email_type, scheduled_send_date
+  |} in
+  
+  match execute_sql_safe query with
+  | Error err -> Error err
+  | Ok rows ->
+      let records = List.map (fun row ->
+        match row with
+        | [contact_id_str; email_type; scheduled_date; scheduled_time; status; skip_reason; scheduler_run_id; created_at] ->
+            (try
+              {
+                contact_id = int_of_string contact_id_str;
+                email_type;
+                scheduled_date;
+                scheduled_time;
+                status;
+                skip_reason;
+                scheduler_run_id;
+                created_at;
+              }
+            with _ -> 
+              (* Default record for parsing errors - will be filtered out by comparison logic *)
+              {
+                contact_id = 0;
+                email_type = "";
+                scheduled_date = "";
+                scheduled_time = "";
+                status = "";
+                skip_reason = "";
+                scheduler_run_id = "";
+                created_at = "";
+              })
+        | _ -> 
+            (* Default record for malformed rows *)
+            {
+              contact_id = 0;
+              email_type = "";
+              scheduled_date = "";
+              scheduled_time = "";
+              status = "";
+              skip_reason = "";
+              scheduler_run_id = "";
+              created_at = "";
+            }
+      ) rows in
+      Ok records
+
+(** 
  * [smart_batch_insert_schedules]: Intelligent bulk schedule update with audit preservation
  * 
  * Purpose:
