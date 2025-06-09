@@ -991,9 +991,15 @@ let calculate_followup_emails context =
         (* Check if this email type is eligible for follow-ups *)
         let is_eligible_for_followup = match email_type with
           | "birthday" | "effective_date" | "aep" | "post_window" -> true
-          | email_type_str when String.starts_with ~prefix:"campaign_" email_type_str ->
+          | email_type_str when String.length email_type_str >= 9 && String.sub email_type_str 0 9 = "campaign_" ->
               (* For campaign emails, check if the campaign has enable_followups=true *)
-              let campaign_type = String.sub email_type_str 9 (String.length email_type_str - 9) in
+              let after_prefix = String.sub email_type_str 9 (String.length email_type_str - 9) in
+              let campaign_type = 
+                (* Extract just the campaign type (before first underscore after "campaign_") *)
+                match String.index_opt after_prefix '_' with
+                | Some underscore_pos -> String.sub after_prefix 0 underscore_pos
+                | None -> after_prefix (* No underscore found, use whole string *)
+              in
               (match get_campaign_type_config campaign_type with
                | Ok campaign_config -> campaign_config.enable_followups
                | Error _ -> false)
