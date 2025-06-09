@@ -990,7 +990,7 @@ let calculate_followup_emails context =
       List.iter (fun (contact_id, email_type, sent_time, _email_id) ->
         (* Check if this email type is eligible for follow-ups *)
         let is_eligible_for_followup = match email_type with
-          | "birthday" | "effective_date" | "aep" | "post_window" -> true
+          | "birthday" | "effective_date" | "post_window" -> true
           | email_type_str when String.length email_type_str >= 9 && String.sub email_type_str 0 9 = "campaign_" ->
               (* For campaign emails, check if the campaign has enable_followups=true *)
               let after_prefix = String.sub email_type_str 9 (String.length email_type_str - 9) in

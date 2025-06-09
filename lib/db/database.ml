@@ -976,7 +976,8 @@ let get_sent_emails_for_followup lookback_days =
     FROM email_schedules 
     WHERE status IN ('sent', 'delivered')
     AND scheduled_send_date >= '%s'
-    AND email_type IN ('birthday', 'effective_date')
+    AND (email_type IN ('birthday', 'effective_date', 'post_window')
+         OR email_type LIKE 'campaign_%%')
     ORDER BY contact_id, sent_time DESC
   |} (string_of_date lookback_date) in
   
