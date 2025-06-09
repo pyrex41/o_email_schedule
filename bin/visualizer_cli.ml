@@ -30,7 +30,6 @@ let default_config = {
 
 (** Find OCaml files recursively in a directory *)
 let rec find_ocaml_files dir =
-  let open Unix in
   if Sys.is_directory dir then
     let files = Sys.readdir dir in
     Array.fold_left (fun acc file ->
@@ -85,7 +84,6 @@ let copy_web_assets output_dir =
 
 (** Start a simple HTTP server *)
 let start_server output_dir port =
-  let open Unix in
   Printf.printf "Starting web server on port %d...\n" port;
   Printf.printf "Visit http://localhost:%d to view the visualization\n" port;
   
@@ -123,6 +121,9 @@ let print_summary analysis config =
   let sorted_functions = 
     analysis.functions 
     |> List.sort (fun a b -> compare b.complexity_score a.complexity_score)
+    |> (fun l -> match config.max_complexity with
+        | Some max_c -> List.filter (fun f -> f.complexity_score <= max_c) l
+        | None -> l)
     |> (fun l -> if List.length l > 10 then take 10 l else l)
   in
   if List.length sorted_functions > 0 then begin
@@ -231,72 +232,9 @@ let main_cmd =
     `S Manpage.s_see_also;
     `P "For more information, see the project documentation.";
   ] in
-  Term.(const run_analysis $ const build_config $ input_files $ output_dir $ web_port $ serve $ verbose $ max_complexity),
+  Term.(const run_analysis $ (const build_config $ input_files $ output_dir $ web_port $ serve $ verbose $ max_complexity)),
   Cmd.info "ocaml-visualizer" ~version:"1.0.0" ~doc ~man
-
-(** Version command *)
-let version_cmd =
-  let doc = "Show version information" in
-  Term.(const (fun () -> Printf.printf "OCaml Program Flow Visualizer v1.0.0\n") $ const ()),
-  Cmd.info "version" ~doc
-
-(** Help command with examples *)
-let help_cmd =
-  let doc = "Show detailed help and examples" in
-  let help_text = {|
-OCaml Program Flow Visualizer - Detailed Help
-
-DESCRIPTION:
-  This tool analyzes OCaml source code to create interactive visualizations
-  of function call flows and program structure. It uses advanced AST parsing
-  and static analysis to extract function definitions, call relationships,
-  and documentation comments.
-
-FEATURES:
-  • Interactive flow diagrams with Mermaid.js
-  • Function complexity analysis
-  • Documentation extraction from OCaml comments
-  • Module hierarchy visualization
-  • Click-to-explore navigation
-  • Source code viewing with syntax highlighting
-  • Export capabilities for diagrams
-
-USAGE EXAMPLES:
-
-  1. Basic analysis of a single file:
-     ocaml-visualizer src/scheduler.ml
-
-  2. Analyze entire project directory:
-     ocaml-visualizer lib/ bin/
-
-  3. Generate and serve immediately:
-     ocaml-visualizer --serve --port 8080 .
-
-  4. Filter complex functions only:
-     ocaml-visualizer --max-complexity 15 src/
-
-  5. Verbose analysis with custom output:
-     ocaml-visualizer --verbose --output docs/ lib/
-
-OUTPUT STRUCTURE:
-  visualizer_output/
-  ├── index.html              # Main web interface
-  ├── visualizer.js           # Interactive functionality
-  ├── visualization.json      # Analysis data
-  └── source_data.json        # Source code content
-
-TIPS:
-  • Use --verbose to see detailed analysis progress
-  • Start with --max-complexity filter for large codebases
-  • The web interface works best in modern browsers
-  • Export diagrams as SVG for documentation
-
-For bug reports and feature requests, please visit the project repository.
-|} in
-  Term.(const (fun () -> Printf.printf "%s\n" help_text) $ const ()),
-  Cmd.info "help" ~doc
 
 (** Main entry point *)
 let () =
-  let cmds = [version_cmd; help_cmd] in
-  exit (Cmd.eval (Cmd.group main_cmd cmds))
+  exit (Cmd.eval (Cmd.v (snd main_cmd) (fst main_cmd)))

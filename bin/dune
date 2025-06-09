@@ -68,7 +68,8 @@
   lwt
   ptime
   timedesc
-  yojson))
+  yojson
+  threads))
 
 (executable
  (public_name native_performance_test)

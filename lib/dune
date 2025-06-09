@@ -9,5 +9,6 @@
   sqlite3
   lwt
   yojson
-  ptime)
+  ptime
+  ptime.clock)
 )
