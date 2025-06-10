@@ -52,12 +52,5 @@ ALTER TABLE organizations ADD COLUMN IF NOT EXISTS
 -- Add index for active organizations
 CREATE INDEX IF NOT EXISTS idx_organizations_active ON organizations(id) WHERE active = 1;
 
--- Set size profiles based on current contact counts (if contacts table exists)
-UPDATE organizations SET size_profile = 
-    CASE 
-        WHEN (SELECT COUNT(*) FROM contacts WHERE org_id = organizations.id) < 10000 THEN 'small'
-        WHEN (SELECT COUNT(*) FROM contacts WHERE org_id = organizations.id) < 100000 THEN 'medium'
-        WHEN (SELECT COUNT(*) FROM contacts WHERE org_id = organizations.id) < 500000 THEN 'large'
-        ELSE 'enterprise'
-    END
-WHERE size_profile = 'medium';  -- Only update default values
+-- Note: Size profiles will remain at default 'medium' value and can be updated
+-- later through application logic that has access to org-specific contact databases
