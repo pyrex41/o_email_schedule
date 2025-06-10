@@ -141,60 +141,62 @@ generateDecisionTreeDiagram state =
 -- Recursively generate decision tree nodes
 generateDecisionTreeNodes : VisualizationState -> DecisionTree -> String -> String
 generateDecisionTreeNodes state tree parentId =
-    let
-        nodeId = decisionNodeId tree.node
-        displayName = decisionNodeToString tree.node
-        
-        -- Determine if node should be expanded
-        isExpanded = List.member nodeId state.expandedNodes
-        
-        -- Create the node
-        nodeShape = 
-            if List.length tree.children > 0 then
-                if isExpanded then
-                    "(" ++ displayName ++ " ➖)"
-                else
-                    "(" ++ displayName ++ " ➕)"
-            else
-                "[" ++ displayName ++ "]"
-        
-        -- Styling based on complexity
-        complexity = getNodeComplexity tree.node
-        complexityClass = 
-            if complexity >= 8 then "high-complexity"
-            else if complexity >= 5 then "medium-complexity"
-            else "low-complexity"
-        
-        currentNode = "    " ++ nodeId ++ nodeShape ++ ":::" ++ complexityClass
-        
-        -- Create edge from parent if it exists
-        parentEdge = 
-            if parentId /= "" then
-                let
-                    conditionLabel = 
-                        case tree.condition of
-                            Just cond -> "|" ++ cond ++ "|"
-                            Nothing -> ""
-                in
-                "    " ++ parentId ++ " --> " ++ nodeId ++ conditionLabel
-            else
-                ""
-        
-        -- Generate child nodes if expanded
-        childNodes = 
-            if isExpanded then
-                tree.children
-                    |> List.map (\child -> generateDecisionTreeNodes state child nodeId)
-                    |> String.join "\n"
-            else
-                ""
-    in
-    [ currentNode
-    , parentEdge
-    , childNodes
-    ]
-        |> List.filter ((/=) "")
-        |> String.join "\n"
+    case tree of
+        DecisionTree treeData ->
+            let
+                nodeId = decisionNodeId treeData.node
+                displayName = decisionNodeToString treeData.node
+                
+                -- Determine if node should be expanded
+                isExpanded = List.member nodeId state.expandedNodes
+                
+                -- Create the node
+                nodeShape = 
+                    if List.length treeData.children > 0 then
+                        if isExpanded then
+                            "(" ++ displayName ++ " ➖)"
+                        else
+                            "(" ++ displayName ++ " ➕)"
+                    else
+                        "[" ++ displayName ++ "]"
+                
+                -- Styling based on complexity
+                complexity = getNodeComplexity treeData.node
+                complexityClass = 
+                    if complexity >= 8 then "high-complexity"
+                    else if complexity >= 5 then "medium-complexity"
+                    else "low-complexity"
+                
+                currentNode = "    " ++ nodeId ++ nodeShape ++ ":::" ++ complexityClass
+                
+                -- Create edge from parent if it exists
+                parentEdge = 
+                    if parentId /= "" then
+                        let
+                            conditionLabel = 
+                                case treeData.condition of
+                                    Just cond -> "|" ++ cond ++ "|"
+                                    Nothing -> ""
+                        in
+                        "    " ++ parentId ++ " --> " ++ nodeId ++ conditionLabel
+                    else
+                        ""
+                
+                -- Generate child nodes if expanded
+                childNodes = 
+                    if isExpanded then
+                        treeData.children
+                            |> List.map (\child -> generateDecisionTreeNodes state child nodeId)
+                            |> String.join "\n"
+                    else
+                        ""
+            in
+            [ currentNode
+            , parentEdge
+            , childNodes
+            ]
+                |> List.filter ((/=) "")
+                |> String.join "\n"
 
 
 -- Generate function call graph integration
@@ -341,19 +343,21 @@ nodeClickHandler state node =
 -- Generate click handlers for decision nodes
 generateDecisionClickHandlers : VisualizationState -> DecisionTree -> String
 generateDecisionClickHandlers state tree =
-    let
-        nodeId = decisionNodeId tree.node
-        currentHandler = "click " ++ nodeId ++ " callback \"Toggle " ++ decisionNodeToString tree.node ++ "\""
-        
-        childHandlers = 
-            tree.children
-                |> List.map (generateDecisionClickHandlers state)
-                |> String.join "\n    "
-    in
-    if childHandlers /= "" then
-        "    " ++ currentHandler ++ "\n    " ++ childHandlers
-    else
-        "    " ++ currentHandler
+    case tree of
+        DecisionTree treeData ->
+            let
+                nodeId = decisionNodeId treeData.node
+                currentHandler = "click " ++ nodeId ++ " callback \"Toggle " ++ decisionNodeToString treeData.node ++ "\""
+                
+                childHandlers = 
+                    treeData.children
+                        |> List.map (generateDecisionClickHandlers state)
+                        |> String.join "\n    "
+            in
+            if childHandlers /= "" then
+                "    " ++ currentHandler ++ "\n    " ++ childHandlers
+            else
+                "    " ++ currentHandler
 
 
 -- Generate call edges between functions

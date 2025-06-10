@@ -57,118 +57,155 @@ hybridConfigFlowEdges =
 -- Define the decision tree for the hybrid configuration system
 hybridConfigDecisionTree : DecisionTree
 hybridConfigDecisionTree =
-    { node = LoadOrgConfig
-    , condition = Just "org_id provided"
-    , details = 
-        [ "Connect to central Turso database"
-        , "Query organizations table for org configuration"
-        , "Parse business rules, preferences, and size profile"
-        , "Handle missing organization with fallback defaults"
-        ]
-    , children =
-        [ { node = CheckContactCount
-          , condition = Just "switch to org database"
-          , details =
-              [ "Set database path to org-specific SQLite file"
-              , "Execute SELECT COUNT(*) FROM contacts"
-              , "Use count for load balancing calculations"
-              , "Fall back to profile estimates if query fails"
-              ]
-          , children =
-              [ { node = DetermineProfile
-                , condition = Just "contact count available"
-                , details =
-                    [ "< 10k contacts → Small profile"
-                    , "10k-100k contacts → Medium profile"  
-                    , "100k-500k contacts → Large profile"
-                    , "500k+ contacts → Enterprise profile"
-                    , "Use org.size_profile if manually set"
-                    ]
-                , children =
-                    [ { node = CalculateCapacity
-                      , condition = Just "profile determined"
-                      , details =
-                          [ "Small: 20% daily cap, 50 ED limit, 1k batch"
-                          , "Medium: 10% daily cap, 200 ED limit, 5k batch"
-                          , "Large: 7% daily cap, 500 ED limit, 10k batch"
-                          , "Enterprise: 5% daily cap, 1k ED limit, 25k batch"
-                          ]
-                      , children =
-                          [ { node = ApplyOverrides
-                            , condition = Just "config_overrides present"
-                            , details =
-                                [ "Parse JSON config_overrides field"
-                                , "Apply daily_send_percentage_cap override"
-                                , "Apply ed_daily_soft_limit override"
-                                , "Apply batch_size override"
-                                , "Ignore unknown override keys"
-                                ]
-                            , children =
-                                [ { node = ProcessContact
-                                  , condition = Just "for each contact"
-                                  , details =
-                                      [ "Calculate anniversary dates (birthday, effective date)"
-                                      , "Check if post-window emails enabled"
-                                      , "Apply customer preferences (send time, timezone)"
-                                      , "Apply communication frequency limits"
-                                      ]
-                                  , children =
-                                      [ { node = CheckExclusions
-                                        , condition = Just "email candidate generated"
-                                        , details =
-                                            [ "Use org.pre_exclusion_buffer_days as base"
-                                            , "Check for state-specific buffer overrides"
-                                            , "Apply exclude_failed_underwriting_global rule"
-                                            , "Check send_without_zipcode_for_universal rule"
-                                            ]
-                                        , children =
-                                            [ { node = CalculatePriority
-                                              , condition = Just "email not excluded"
-                                              , details =
-                                                  [ "Birthday: priority 10 (from SystemConstants)"
-                                                  , "Effective Date: priority 20"
-                                                  , "Post Window: priority 40"
-                                                  , "Campaign: use campaign.priority"
-                                                  , "Followup: priority 50"
-                                                  ]
-                                              , children =
-                                                  [ { node = ScheduleEmail
-                                                    , condition = Just "priority assigned"
-                                                    , details =
-                                                        [ "Set scheduled_date and scheduled_time"
-                                                        , "Use org send_time_hour/minute preferences"
-                                                        , "Convert to org timezone"
-                                                        , "Insert into email_schedules table"
-                                                        ]
-                                                    , children =
-                                                        [ { node = BalanceLoad
-                                                          , condition = Just "all emails scheduled"
-                                                          , details =
-                                                              [ "Check daily totals against capacity limits"
-                                                              , "Apply overage_threshold (1.2x from SystemConstants)"
-                                                              , "Spread overflow across catch_up_spread_days (7 days)"
-                                                              , "Prioritize within daily limits"
-                                                              ]
-                                                          , children = []
-                                                          }
-                                                        ]
-                                                    }
-                                                  ]
-                                              }
-                                            ]
-                                        }
-                                      ]
-                                  }
-                                ]
-                            }
-                          ]
-                      }
-                    ]
-                }
-              ]
-          }
-        ]
-    }
+    DecisionTree
+        { node = LoadOrgConfig
+        , condition = Just "org_id provided"
+        , details = 
+            [ "Connect to central Turso database"
+            , "Query organizations table for org configuration"
+            , "Parse business rules, preferences, and size profile"
+            , "Handle missing organization with fallback defaults"
+            ]
+        , children = [ checkContactCountTree ]
+        }
+
+
+checkContactCountTree : DecisionTree
+checkContactCountTree =
+    DecisionTree
+        { node = CheckContactCount
+        , condition = Just "switch to org database"
+        , details =
+            [ "Set database path to org-specific SQLite file"
+            , "Execute SELECT COUNT(*) FROM contacts"
+            , "Use count for load balancing calculations"
+            , "Fall back to profile estimates if query fails"
+            ]
+        , children = [ determineProfileTree ]
+        }
+
+
+determineProfileTree : DecisionTree
+determineProfileTree =
+    DecisionTree
+        { node = DetermineProfile
+        , condition = Just "contact count available"
+        , details =
+            [ "< 10k contacts → Small profile"
+            , "10k-100k contacts → Medium profile"  
+            , "100k-500k contacts → Large profile"
+            , "500k+ contacts → Enterprise profile"
+            , "Use org.size_profile if manually set"
+            ]
+        , children = [ calculateCapacityTree ]
+        }
+
+
+calculateCapacityTree : DecisionTree
+calculateCapacityTree =
+    DecisionTree
+        { node = CalculateCapacity
+        , condition = Just "profile determined"
+        , details =
+            [ "Small: 20% daily cap, 50 ED limit, 1k batch"
+            , "Medium: 10% daily cap, 200 ED limit, 5k batch"
+            , "Large: 7% daily cap, 500 ED limit, 10k batch"
+            , "Enterprise: 5% daily cap, 1k ED limit, 25k batch"
+            ]
+        , children = [ applyOverridesTree ]
+        }
+
+
+applyOverridesTree : DecisionTree
+applyOverridesTree =
+    DecisionTree
+        { node = ApplyOverrides
+        , condition = Just "config_overrides present"
+        , details =
+            [ "Parse JSON config_overrides field"
+            , "Apply daily_send_percentage_cap override"
+            , "Apply ed_daily_soft_limit override"
+            , "Apply batch_size override"
+            , "Ignore unknown override keys"
+            ]
+        , children = [ processContactTree ]
+        }
+
+
+processContactTree : DecisionTree
+processContactTree =
+    DecisionTree
+        { node = ProcessContact
+        , condition = Just "for each contact"
+        , details =
+            [ "Calculate anniversary dates (birthday, effective date)"
+            , "Check if post-window emails enabled"
+            , "Apply customer preferences (send time, timezone)"
+            , "Apply communication frequency limits"
+            ]
+        , children = [ checkExclusionsTree ]
+        }
+
+
+checkExclusionsTree : DecisionTree
+checkExclusionsTree =
+    DecisionTree
+        { node = CheckExclusions
+        , condition = Just "email candidate generated"
+        , details =
+            [ "Use org.pre_exclusion_buffer_days as base"
+            , "Check for state-specific buffer overrides"
+            , "Apply exclude_failed_underwriting_global rule"
+            , "Check send_without_zipcode_for_universal rule"
+            ]
+        , children = [ calculatePriorityTree ]
+        }
+
+
+calculatePriorityTree : DecisionTree
+calculatePriorityTree =
+    DecisionTree
+        { node = CalculatePriority
+        , condition = Just "email not excluded"
+        , details =
+            [ "Birthday: priority 10 (from SystemConstants)"
+            , "Effective Date: priority 20"
+            , "Post Window: priority 40"
+            , "Campaign: use campaign.priority"
+            , "Followup: priority 50"
+            ]
+        , children = [ scheduleEmailTree ]
+        }
+
+
+scheduleEmailTree : DecisionTree
+scheduleEmailTree =
+    DecisionTree
+        { node = ScheduleEmail
+        , condition = Just "priority assigned"
+        , details =
+            [ "Set scheduled_date and scheduled_time"
+            , "Use org send_time_hour/minute preferences"
+            , "Convert to org timezone"
+            , "Insert into email_schedules table"
+            ]
+        , children = [ balanceLoadTree ]
+        }
+
+
+balanceLoadTree : DecisionTree
+balanceLoadTree =
+    DecisionTree
+        { node = BalanceLoad
+        , condition = Just "all emails scheduled"
+        , details =
+            [ "Check daily totals against capacity limits"
+            , "Apply overage_threshold (1.2x from SystemConstants)"
+            , "Spread overflow across catch_up_spread_days (7 days)"
+            , "Prioritize within daily limits"
+            ]
+        , children = []
+        }
 
 
 -- Function to get details for a specific decision node

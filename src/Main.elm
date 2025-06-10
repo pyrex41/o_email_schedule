@@ -100,17 +100,25 @@ update msg model =
     case msg of
         ChangeView viewType ->
             let
-                newVisualizationState = 
-                    { model.visualizationState | currentView = viewType }
-                
-                newDiagram = 
+                currentState = model.visualizationState
+                newVisualizationState =
+                    { currentState | currentView = viewType }
+
+                newDiagram =
                     case viewType of
-                        DataFlowView -> generateDataFlowDiagram newVisualizationState
-                        DecisionTreeView -> generateDecisionTreeDiagram newVisualizationState
-                        FunctionCallGraphView -> generateFunctionCallGraph model.functions newVisualizationState
-                        ConfigFlowView -> generateConfigFlowDiagram model
+                        DataFlowView ->
+                            generateDataFlowDiagram newVisualizationState
+
+                        DecisionTreeView ->
+                            generateDecisionTreeDiagram newVisualizationState
+
+                        FunctionCallGraphView ->
+                            generateFunctionCallGraph model.functions newVisualizationState
+
+                        ConfigFlowView ->
+                            generateConfigFlowDiagram model
             in
-            ( { model 
+            ( { model
               | visualizationState = newVisualizationState
               , currentDiagram = newDiagram
               }
@@ -119,8 +127,9 @@ update msg model =
 
         SelectNode nodeId ->
             let
+                currentState = model.visualizationState
                 newVisualizationState = 
-                    { model.visualizationState | selectedNode = Just nodeId }
+                    { currentState | selectedNode = Just nodeId }
                 
                 nodeDetails = createNodeDetails nodeId model
             in
@@ -133,16 +142,17 @@ update msg model =
 
         ToggleNodeExpansion nodeId ->
             let
+                currentState = model.visualizationState
                 newExpandedNodes = 
-                    if List.member nodeId model.visualizationState.expandedNodes then
-                        List.filter ((/=) nodeId) model.visualizationState.expandedNodes
+                    if List.member nodeId currentState.expandedNodes then
+                        List.filter ((/=) nodeId) currentState.expandedNodes
                     else
-                        nodeId :: model.visualizationState.expandedNodes
+                        nodeId :: currentState.expandedNodes
                 
                 newVisualizationState = 
-                    { model.visualizationState | expandedNodes = newExpandedNodes }
+                    { currentState | expandedNodes = newExpandedNodes }
                 
-                newDiagram = regenerateDiagram model.visualizationState.currentView newVisualizationState model
+                newDiagram = regenerateDiagram currentState.currentView newVisualizationState model
             in
             ( { model 
               | visualizationState = newVisualizationState
@@ -159,10 +169,11 @@ update msg model =
 
         SetComplexityFilter complexity ->
             let
+                currentState = model.visualizationState
                 newVisualizationState = 
-                    { model.visualizationState | filterComplexity = complexity }
+                    { currentState | filterComplexity = complexity }
                 
-                newDiagram = regenerateDiagram model.visualizationState.currentView newVisualizationState model
+                newDiagram = regenerateDiagram currentState.currentView newVisualizationState model
             in
             ( { model 
               | visualizationState = newVisualizationState
@@ -173,10 +184,11 @@ update msg model =
 
         ToggleModules ->
             let
+                currentState = model.visualizationState
                 newVisualizationState = 
-                    { model.visualizationState | showModules = not model.visualizationState.showModules }
+                    { currentState | showModules = not currentState.showModules }
                 
-                newDiagram = regenerateDiagram model.visualizationState.currentView newVisualizationState model
+                newDiagram = regenerateDiagram currentState.currentView newVisualizationState model
             in
             ( { model 
               | visualizationState = newVisualizationState
@@ -205,10 +217,11 @@ update msg model =
 
         HighlightPath path ->
             let
+                currentState = model.visualizationState
                 newVisualizationState = 
-                    { model.visualizationState | highlightedPath = path }
+                    { currentState | highlightedPath = path }
                 
-                newDiagram = regenerateDiagram model.visualizationState.currentView newVisualizationState model
+                newDiagram = regenerateDiagram currentState.currentView newVisualizationState model
             in
             ( { model 
               | visualizationState = newVisualizationState
@@ -219,10 +232,11 @@ update msg model =
 
         ClearHighlight ->
             let
+                currentState = model.visualizationState
                 newVisualizationState = 
-                    { model.visualizationState | highlightedPath = [] }
+                    { currentState | highlightedPath = [] }
                 
-                newDiagram = regenerateDiagram model.visualizationState.currentView newVisualizationState model
+                newDiagram = regenerateDiagram currentState.currentView newVisualizationState model
             in
             ( { model 
               | visualizationState = newVisualizationState
@@ -335,7 +349,7 @@ viewExampleOrgs model =
                     [ h4 [] [ text config.name ]
                     , div [ class "config-details" ]
                         [ configDetail "Size Profile" (sizeProfileToString config.sizeProfile)
-                        , configDetail "Daily Cap" (String.fromFloat (getLoadBalancingConfig config).dailySendPercentageCap * 100 ++ "%")
+                        , configDetail "Daily Cap" (String.fromFloat ((getLoadBalancingConfig config).dailySendPercentageCap * 100) ++ "%")
                         , configDetail "Batch Size" (String.fromInt (getLoadBalancingConfig config).batchSize)
                         , configDetail "ED Soft Limit" (String.fromInt (getLoadBalancingConfig config).edDailySoftLimit)
                         ]
@@ -587,7 +601,7 @@ createNodeDetails nodeId model =
                 
                 Nothing ->
                     -- Try to match against functions
-                    case List.Extra.find (\f -> sanitizeFunctionName f.name == nodeId) model.functions of
+                    case List.Extra.find (\f -> HybridConfig.DataFlow.sanitizeFunctionName f.name == nodeId) model.functions of
                         Just func ->
                             Just (functionToDetails func)
                         
@@ -598,7 +612,7 @@ createNodeDetails nodeId model =
 findDataFlowNode : String -> Maybe DataFlowNode
 findDataFlowNode nodeId =
     hybridConfigDataFlow
-        |> List.Extra.find (\node -> dataFlowNodeId node == nodeId)
+        |> List.Extra.find (\node -> HybridConfig.DataFlow.dataFlowNodeId node == nodeId)
 
 
 findDecisionNode : String -> Maybe DecisionNode
@@ -607,12 +621,14 @@ findDecisionNode nodeId =
         allNodes = flattenDecisionTree hybridConfigDecisionTree
     in
     allNodes
-        |> List.Extra.find (\node -> decisionNodeId node == nodeId)
+        |> List.Extra.find (\node -> HybridConfig.DataFlow.decisionNodeId node == nodeId)
 
 
 flattenDecisionTree : DecisionTree -> List DecisionNode
 flattenDecisionTree tree =
-    tree.node :: List.concatMap flattenDecisionTree tree.children
+    case tree of
+        DecisionTree treeData ->
+            treeData.node :: List.concatMap flattenDecisionTree treeData.children
 
 
 dataFlowNodeToDetails : DataFlowNode -> NodeDetails
@@ -711,9 +727,9 @@ getRelatedDataFlowNodes node =
     hybridConfigFlowEdges
         |> List.concatMap (\edge ->
             if edge.from == dataFlowNodeToString node then
-                [ sanitizeNodeId edge.to ]
+                [ HybridConfig.DataFlow.sanitizeNodeId edge.to ]
             else if edge.to == dataFlowNodeToString node then
-                [ sanitizeNodeId edge.from ]
+                [ HybridConfig.DataFlow.sanitizeNodeId edge.from ]
             else
                 []
         )
@@ -905,7 +921,17 @@ functionsDecoder =
 
 functionDecoder : Decode.Decoder FunctionInfo
 functionDecoder =
-    Decode.map9 FunctionInfo
+    Decode.map8 (\name module_ parameters returnType complexityScore calls isRecursive rest ->
+        { name = name
+        , module_ = module_
+        , parameters = parameters
+        , returnType = returnType
+        , complexityScore = complexityScore
+        , calls = calls
+        , isRecursive = isRecursive
+        , documentation = rest.documentation
+        , sourceLocation = rest.sourceLocation
+        })
         (Decode.field "name" Decode.string)
         (Decode.field "module" Decode.string)
         (Decode.field "parameters" (Decode.list parameterDecoder))
@@ -913,8 +939,11 @@ functionDecoder =
         (Decode.field "complexityScore" Decode.int)
         (Decode.field "calls" (Decode.list Decode.string))
         (Decode.field "isRecursive" Decode.bool)
-        (Decode.maybe (Decode.field "documentation" Decode.string))
-        (Decode.field "sourceLocation" locationDecoder)
+        (Decode.map2 (\documentation sourceLocation -> 
+            { documentation = documentation, sourceLocation = sourceLocation })
+            (Decode.maybe (Decode.field "documentation" Decode.string))
+            (Decode.field "sourceLocation" locationDecoder)
+        )
 
 
 parameterDecoder : Decode.Decoder ( String, Maybe String )

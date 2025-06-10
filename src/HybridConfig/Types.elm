@@ -164,12 +164,13 @@ decisionNodeToString node =
 
 
 -- Decision tree structure
-type alias DecisionTree =
-    { node : DecisionNode
-    , condition : Maybe String
-    , children : List DecisionTree
-    , details : List String
-    }
+type DecisionTree 
+    = DecisionTree 
+        { node : DecisionNode
+        , condition : Maybe String
+        , children : List DecisionTree
+        , details : List String
+        }
 
 
 -- Function metadata for visualization
