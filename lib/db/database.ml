@@ -1424,14 +1424,22 @@ let load_organization_config org_id =
     WHERE id = %d AND active = 1
   |} org_id in
   
-  let result = match execute_sql_safe query with
-    | Error err -> Error err
-    | Ok [row] -> 
-        (match parse_organization_config_row row with
-         | Some config -> Ok config
-         | None -> Error (ParseError "Failed to parse organization config"))
-    | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
-    | Ok _ -> Error (ParseError "Multiple organizations found")
+  (* Exception-safe execution with guaranteed path restoration *)
+  let result = 
+    try
+      match execute_sql_safe query with
+      | Error err -> Error err
+      | Ok [row] -> 
+          (match parse_organization_config_row row with
+           | Some config -> Ok config
+           | None -> Error (ParseError "Failed to parse organization config"))
+      | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
+      | Ok _ -> Error (ParseError "Multiple organizations found")
+    with
+    | exn -> 
+        (* Restore path before re-raising exception *)
+        db_path := saved_path;
+        raise exn
   in
   
   (* Restore original database path *)
@@ -1450,11 +1458,19 @@ let get_state_buffer_override org_id state =
     WHERE org_id = %d AND state_code = '%s'
   |} org_id (string_of_state state) in
   
-  let result = match execute_sql_safe query with
-    | Ok [[buffer_str]] -> 
-        (try Some (int_of_string buffer_str)
-         with _ -> None)
-    | _ -> None
+  (* Exception-safe execution with guaranteed path restoration *)
+  let result = 
+    try
+      match execute_sql_safe query with
+      | Ok [[buffer_str]] -> 
+          (try Some (int_of_string buffer_str)
+           with _ -> None)
+      | _ -> None
+    with
+    | exn -> 
+        (* Restore path before re-raising exception *)
+        db_path := saved_path;
+        raise exn
   in
   
   db_path := saved_path;
