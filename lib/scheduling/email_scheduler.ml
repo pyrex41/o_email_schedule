@@ -625,7 +625,7 @@ let generate_post_window_for_skipped context skipped_schedules =
            | Ok (contacts : contact list) ->
                (match List.find_opt (fun (c : contact) -> c.id = schedule.contact_id) contacts with
                 | Some contact ->
-                    (match get_post_window_date contact with
+                    (match get_post_window_date context.config.organization contact with
                      | Some post_date ->
                          let post_window_schedule = {
                            contact_id = schedule.contact_id;
