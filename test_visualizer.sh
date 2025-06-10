@@ -122,3 +122,38 @@ echo "📖 Testing help system..."
 
 echo ""
 echo "✨ All tests passed! The OCaml Program Flow Visualizer is ready to use."
+
+echo "=== Testing OCaml Visualizer ==="
+
+# Test basic help
+echo ""
+echo "=== Testing help command ==="
+dune exec ocaml-visualizer -- --help
+
+# Test analysis of core libraries
+echo ""
+echo "=== Generating full project visualization ==="
+dune exec ocaml-visualizer -- --verbose --output test_viz lib/
+
+# Test focused analysis
+echo ""
+echo "=== Generating focused scheduling visualization ==="
+dune exec ocaml-visualizer -- --verbose --max-complexity 5 --output scheduling_viz lib/scheduling/ lib/domain/
+
+# Test single file analysis  
+echo ""
+echo "=== Analyzing single file ==="
+dune exec ocaml-visualizer -- --verbose --output single_viz lib/scheduler.ml
+
+echo ""
+echo "=== Visualizer Test Results ==="
+echo "✅ Full project visualization: test_viz/"
+echo "✅ Focused scheduling visualization: scheduling_viz/"  
+echo "✅ Single file visualization: single_viz/"
+echo ""
+echo "To view any visualization:"
+echo "  cd test_viz && python3 -m http.server 8000"
+echo "  Then open http://localhost:8000"
+echo ""
+echo "=== Original performance tests below ==="
+echo ""

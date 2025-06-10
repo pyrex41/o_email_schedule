@@ -4,13 +4,13 @@ open Call_graph
 open Doc_extractor
 
 (** Convert Location.t to JSON *)
-let location_to_json _loc =
+let location_to_json loc =
   `Assoc [
-    ("file", `String "unknown");
-    ("start_line", `Int 1);
-    ("start_col", `Int 0);
-    ("end_line", `Int 1);
-    ("end_col", `Int 0);
+    ("file", `String loc.Location.loc_start.pos_fname);
+    ("start_line", `Int loc.Location.loc_start.pos_lnum);
+    ("start_col", `Int (loc.Location.loc_start.pos_cnum - loc.Location.loc_start.pos_bol));
+    ("end_line", `Int loc.Location.loc_end.pos_lnum);
+    ("end_col", `Int (loc.Location.loc_end.pos_cnum - loc.Location.loc_end.pos_bol));
   ]
 
 (** Convert parsed documentation to JSON *)
@@ -41,16 +41,29 @@ let function_to_json func docs_map =
     | Some d -> d
     | None -> empty_doc
   in
+  let parameters_json = List.map (fun (name, type_opt) ->
+    match type_opt with
+    | Some typ -> `Assoc [("name", `String name); ("type", `String typ)]
+    | None -> `Assoc [("name", `String name); ("type", `Null)]
+  ) func.parameters in
+  let return_type_json = match func.return_type with
+    | Some typ -> `String typ
+    | None -> `Null
+  in
   `Assoc [
     ("name", `String func.name);
     ("location", location_to_json func.location);
-    ("parameters", `List (List.map (fun p -> `String p) func.parameters));
+    ("start_line", `Int func.start_line);
+    ("end_line", `Int func.end_line);
+    ("source_code", `String func.source_code);
+    ("parameters", `List parameters_json);
+    ("return_type", return_type_json);
     ("complexity_score", `Int func.complexity_score);
     ("calls", `List (List.map (fun c -> `String c) func.calls));
     ("is_recursive", `Bool func.is_recursive);
     ("module_path", `List (List.map (fun m -> `String m) func.module_path));
     ("documentation", doc_to_json doc);
-    ("file", `String "unknown");
+    ("file", `String func.file);
   ]
 
 (** Convert enhanced call graph to JSON with metrics *)

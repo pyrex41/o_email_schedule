@@ -1,0 +1,737 @@
+{
+  "analysis": {
+    "functions": [
+      {
+        "name": "extract_doc_attribute",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 28,
+        "end_line": 38,
+        "source_code": "let extract_doc_attribute attrs =\n  let find_doc_attr attr =\n    match attr.attr_name.txt with\n    | \"ocaml.doc\" -> \n        (match attr.attr_payload with\n         | PStr [{pstr_desc = Pstr_eval ({pexp_desc = Pexp_constant (Pconst_string (doc, _, _)); _}, _); _}] ->\n             Some doc\n         | _ -> None)\n    | _ -> None\n  in\n  List.find_map find_doc_attr attrs",
+        "parameters": [ { "name": "attrs", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Extract documentation from attributes and preceding comments",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "extract_source_code",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 41,
+        "end_line": 68,
+        "source_code": "let extract_source_code content location =\n  let lines = String.split_on_char '\\n' content in\n  let start_line = location.loc_start.pos_lnum in\n  let end_line = location.loc_end.pos_lnum in\n  let start_char = location.loc_start.pos_cnum - location.loc_start.pos_bol in\n  let end_char = location.loc_end.pos_cnum - location.loc_end.pos_bol in\n  \n  if start_line = end_line then\n    (* Single line *)\n    let line = List.nth lines (start_line - 1) in\n    String.sub line start_char (end_char - start_char)\n  else\n    (* Multiple lines *)\n    let selected_lines = \n      List.mapi (fun i line ->\n        let line_num = i + 1 in\n        if line_num < start_line || line_num > end_line then\n          None\n        else if line_num = start_line then\n          Some (String.sub line start_char (String.length line - start_char))\n        else if line_num = end_line then\n          Some (String.sub line 0 end_char)\n        else\n          Some line\n      ) lines\n      |> List.filter_map (fun x -> x)\n    in\n    String.concat \"\\n\" selected_lines",
+        "parameters": [
+          { "name": "content", "type": null },
+          { "name": "location", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Extract source code from location and file content",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "calculate_complexity",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 71,
+        "end_line": 79,
+        "source_code": "let calculate_complexity expr =\n  let count_nodes = function\n    | {pexp_desc = Pexp_match (_, cases); _} -> 1 + List.length cases\n    | {pexp_desc = Pexp_ifthenelse (_, _, Some _); _} -> 2\n    | {pexp_desc = Pexp_ifthenelse (_, _, None); _} -> 1\n    | {pexp_desc = Pexp_apply (_, args); _} -> List.length args\n    | _ -> 1\n  in\n  count_nodes expr",
+        "parameters": [ { "name": "expr", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Simple complexity calculation",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "extract_calls",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 82,
+        "end_line": 95,
+        "source_code": "let extract_calls expr =\n  let calls = ref [] in\n  let rec extract_from_expr = function\n    | {pexp_desc = Pexp_ident {txt = Lident name; _}; _} ->\n        calls := name :: !calls\n    | {pexp_desc = Pexp_ident {txt = Ldot (_, name); _}; _} ->\n        calls := name :: !calls\n    | {pexp_desc = Pexp_apply (func, args); _} ->\n        extract_from_expr func;\n        List.iter (fun (_, arg) -> extract_from_expr arg) args\n    | _ -> ()\n  in\n  extract_from_expr expr;\n  List.rev !calls",
+        "parameters": [ { "name": "expr", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Extract function calls",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "extract_parameters",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 98,
+        "end_line": 118,
+        "source_code": "let extract_parameters pattern =\n  let rec extract_pattern_names pattern =\n    match pattern.ppat_desc with\n    | Ppat_var {txt; _} -> [(txt, None)]\n    | Ppat_constraint (inner_pattern, core_type) ->\n        let names = extract_pattern_names inner_pattern in\n        List.map (fun (name, _) -> (name, Some (string_of_core_type core_type))) names\n    | Ppat_tuple patterns ->\n        List.concat_map extract_pattern_names patterns\n    | Ppat_record (fields, _) ->\n        List.concat_map (fun (_, pattern) -> extract_pattern_names pattern) fields\n    | _ -> []\n  and string_of_core_type core_type =\n    (* Simple type to string conversion - can be enhanced *)\n    match core_type.ptyp_desc with\n    | Ptyp_constr ({txt = Lident name; _}, []) -> name\n    | Ptyp_constr ({txt = Ldot (_, name); _}, []) -> name\n    | Ptyp_arrow (_, _, _) -> \"function\"\n    | _ -> \"unknown\"\n  in\n  extract_pattern_names pattern",
+        "parameters": [ { "name": "pattern", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Enhanced parameter extraction with type information",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "process_value_binding",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 121,
+        "end_line": 164,
+        "source_code": "let process_value_binding content module_path binding =\n  match binding.pvb_pat.ppat_desc with\n  | Ppat_var {txt = name; _} ->\n      let doc = extract_doc_attribute binding.pvb_attributes in\n      let calls = extract_calls binding.pvb_expr in\n      let complexity = calculate_complexity binding.pvb_expr in\n      let source_code = extract_source_code content binding.pvb_loc in\n      let start_line = binding.pvb_loc.loc_start.pos_lnum in\n      let end_line = binding.pvb_loc.loc_end.pos_lnum in\n      let parameters = \n        let rec extract_fun_params = function\n          | {pexp_desc = Pexp_fun (_, _, pattern, body); _} ->\n              extract_parameters pattern @ extract_fun_params body\n          | _ -> []\n        in\n        extract_fun_params binding.pvb_expr\n      in\n      let return_type = \n        let string_of_core_type core_type =\n          match core_type.ptyp_desc with\n          | Ptyp_constr ({txt = Lident name; _}, []) -> name\n          | Ptyp_constr ({txt = Ldot (_, name); _}, []) -> name\n          | Ptyp_arrow (_, _, return_type) -> string_of_core_type return_type\n          | _ -> \"unknown\"\n        in\n        match binding.pvb_expr.pexp_desc with\n        | Pexp_constraint (_, core_type) -> Some (string_of_core_type core_type)\n        | _ -> None\n      in\n      Some {\n        name;\n        location = binding.pvb_loc;\n        start_line;\n        end_line;\n        source_code;\n        parameters;\n        doc_comment = doc;\n        complexity_score = complexity;\n        calls;\n        is_recursive = false;\n        module_path;\n        return_type;\n      }\n  | _ -> None",
+        "parameters": [
+          { "name": "content", "type": null },
+          { "name": "module_path", "type": null },
+          { "name": "binding", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Process a value binding",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "analyze_structure_item",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 167,
+        "end_line": 173,
+        "source_code": "let analyze_structure_item content module_path item =\n  match item.pstr_desc with\n  | Pstr_value (rec_flag, bindings) ->\n      let functions = List.filter_map (process_value_binding content module_path) bindings in\n      let is_recursive = match rec_flag with Recursive -> true | Nonrecursive -> false in\n      List.map (fun f -> {f with is_recursive}) functions\n  | _ -> []",
+        "parameters": [
+          { "name": "content", "type": null },
+          { "name": "module_path", "type": null },
+          { "name": "item", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Analyze a structure item",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "analyze_file",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 176,
+        "end_line": 193,
+        "source_code": "let analyze_file filename =\n  try\n    let ic = open_in filename in\n    let content = really_input_string ic (in_channel_length ic) in\n    close_in ic;\n    let lexbuf = Lexing.from_string content in\n    let ast = Ppxlib.Parse.implementation lexbuf in\n    let functions = List.concat_map (analyze_structure_item content []) ast in\n    let call_graph = \n      List.concat_map (fun f -> \n        List.map (fun callee -> (f.name, callee)) f.calls\n      ) functions \n    in\n    let modules = [Filename.basename filename] in\n    {functions; call_graph; modules; errors = []}\n  with\n  | exn -> \n      {functions = []; call_graph = []; modules = []; errors = [Printexc.to_string exn]}",
+        "parameters": [ { "name": "filename", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Main analysis function",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "analyze_files",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 196,
+        "end_line": 201,
+        "source_code": "let analyze_files filenames =\n  let results = List.map analyze_file filenames in\n  let all_functions = List.concat_map (fun r -> r.functions) results in\n  let all_call_graph = List.concat_map (fun r -> r.call_graph) results in\n  let all_errors = List.concat_map (fun r -> r.errors) results in\n  {functions = all_functions; call_graph = all_call_graph; modules = []; errors = all_errors}",
+        "parameters": [ { "name": "filenames", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Analyze multiple files",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "find_callers",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 204,
+        "end_line": 208,
+        "source_code": "let find_callers target_function analysis =\n  analysis.call_graph\n  |> List.filter (fun (_, callee) -> callee = target_function)\n  |> List.map fst\n  |> List.sort_uniq String.compare",
+        "parameters": [
+          { "name": "target_function", "type": null },
+          { "name": "analysis", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Find functions that call a specific function",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "find_callees",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 211,
+        "end_line": 215,
+        "source_code": "let find_callees source_function analysis =\n  analysis.call_graph\n  |> List.filter (fun (caller, _) -> caller = source_function)\n  |> List.map snd\n  |> List.sort_uniq String.compare",
+        "parameters": [
+          { "name": "source_function", "type": null },
+          { "name": "analysis", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Find functions called by a specific function",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "get_function_info",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 218,
+        "end_line": 219,
+        "source_code": "let get_function_info name analysis =\n  List.find_opt (fun f -> f.name = name) analysis.functions",
+        "parameters": [
+          { "name": "name", "type": null },
+          { "name": "analysis", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Get function information by name",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "location_to_json",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 7,
+        "end_line": 14,
+        "source_code": "let location_to_json _loc =\n  `Assoc [\n    (\"file\", `String \"unknown\");\n    (\"start_line\", `Int 1);\n    (\"start_col\", `Int 0);\n    (\"end_line\", `Int 1);\n    (\"end_col\", `Int 0);\n  ]",
+        "parameters": [ { "name": "_loc", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Convert Location.t to JSON",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "doc_to_json",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 17,
+        "end_line": 36,
+        "source_code": "let doc_to_json doc =\n  let option_to_json f = function\n    | Some v -> f v\n    | None -> `Null\n  in\n  let string_pairs_to_json pairs =\n    `List (List.map (fun (k, v) -> `Assoc [(\"name\", `String k); (\"description\", `String v)]) pairs)\n  in\n  `Assoc [\n    (\"summary\", option_to_json (fun s -> `String s) doc.summary);\n    (\"description\", option_to_json (fun s -> `String s) doc.description);\n    (\"parameters\", string_pairs_to_json doc.parameters);\n    (\"returns\", option_to_json (fun s -> `String s) doc.returns);\n    (\"examples\", `List (List.map (fun s -> `String s) doc.examples));\n    (\"see_also\", `List (List.map (fun s -> `String s) doc.see_also));\n    (\"since\", option_to_json (fun s -> `String s) doc.since);\n    (\"deprecated\", option_to_json (fun s -> `String s) doc.deprecated);\n    (\"raises\", string_pairs_to_json doc.raises);\n    (\"tags\", string_pairs_to_json doc.tags);\n  ]",
+        "parameters": [ { "name": "doc", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Convert parsed documentation to JSON",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "function_to_json",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 39,
+        "end_line": 67,
+        "source_code": "let function_to_json func docs_map =\n  let doc = match List.assoc_opt func.name docs_map with\n    | Some d -> d\n    | None -> empty_doc\n  in\n  let parameters_json = List.map (fun (name, type_opt) ->\n    match type_opt with\n    | Some typ -> `Assoc [(\"name\", `String name); (\"type\", `String typ)]\n    | None -> `Assoc [(\"name\", `String name); (\"type\", `Null)]\n  ) func.parameters in\n  let return_type_json = match func.return_type with\n    | Some typ -> `String typ\n    | None -> `Null\n  in\n  `Assoc [\n    (\"name\", `String func.name);\n    (\"location\", location_to_json func.location);\n    (\"start_line\", `Int func.start_line);\n    (\"end_line\", `Int func.end_line);\n    (\"source_code\", `String func.source_code);\n    (\"parameters\", `List parameters_json);\n    (\"return_type\", return_type_json);\n    (\"complexity_score\", `Int func.complexity_score);\n    (\"calls\", `List (List.map (fun c -> `String c) func.calls));\n    (\"is_recursive\", `Bool func.is_recursive);\n    (\"module_path\", `List (List.map (fun m -> `String m) func.module_path));\n    (\"documentation\", doc_to_json doc);\n    (\"file\", `String \"unknown\");\n  ]",
+        "parameters": [
+          { "name": "func", "type": null },
+          { "name": "docs_map", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Convert function info to JSON",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "enhanced_call_graph_to_json",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 70,
+        "end_line": 110,
+        "source_code": "let enhanced_call_graph_to_json enhanced_graph docs_map =\n  let functions_json = \n    enhanced_graph.graph.vertices\n    |> List.map (fun func -> function_to_json func docs_map)\n  in\n  \n  let edges_json = \n    enhanced_graph.graph.edges\n    |> List.map (fun (source, target) ->\n        `Assoc [\n          (\"source\", `String source);\n          (\"target\", `String target);\n        ])\n  in\n  \n  let entry_points_json = \n    `List (List.map (fun f -> `String f.name) enhanced_graph.entry_points)\n  in\n  \n  let cycles_json = \n    `List (List.map (fun cycle ->\n      `List (List.map (fun f -> `String f.name) cycle)\n    ) enhanced_graph.cycles)\n  in\n  \n  let (min_complexity, max_complexity, avg_complexity) = enhanced_graph.complexity_stats in\n  let complexity_stats_json = \n    `Assoc [\n      (\"min\", `Int min_complexity);\n      (\"max\", `Int max_complexity);\n      (\"average\", `Float avg_complexity);\n    ]\n  in\n  \n  `Assoc [\n    (\"functions\", `List functions_json);\n    (\"edges\", `List edges_json);\n    (\"entry_points\", entry_points_json);\n    (\"cycles\", cycles_json);\n    (\"complexity_stats\", complexity_stats_json);\n  ]",
+        "parameters": [
+          { "name": "enhanced_graph", "type": null },
+          { "name": "docs_map", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Convert enhanced call graph to JSON with metrics",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "generate_mermaid_diagram",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 113,
+        "end_line": 178,
+        "source_code": "let generate_mermaid_diagram enhanced_graph ?(max_complexity = None) ?(show_modules = true) () =\n  let buffer = Buffer.create 4096 in\n  \n  Buffer.add_string buffer \"%%{init: {\\\"flowchart\\\": {\\\"defaultRenderer\\\": \\\"elk\\\"}} }%%\\n\";\n  Buffer.add_string buffer \"flowchart TD\\n\";\n  \n  let functions = enhanced_graph.graph.vertices in\n  List.iter (fun func ->\n    let should_include = match max_complexity with\n      | Some threshold -> func.complexity_score <= threshold\n      | None -> true\n    in\n    if should_include then begin\n      let node_id = func.name in\n      let module_prefix = if show_modules && List.length func.module_path > 0 then\n        String.concat \".\" func.module_path ^ \".\"\n      else \"\"\n      in\n      let display_name = module_prefix ^ func.name in\n      \n      let complexity_class = match func.complexity_score with\n        | score when score > 10 -> \"high-complexity\"\n        | score when score > 5 -> \"medium-complexity\"\n        | _ -> \"low-complexity\"\n      in\n      \n      let recursive_indicator = if func.is_recursive then \" 🔄\" else \"\" in\n      \n      Buffer.add_string buffer (Printf.sprintf \"    %s[\\\"%s%s\\\"]:::%s\\n\" \n        node_id display_name recursive_indicator complexity_class);\n    end\n  ) functions;\n  \n  List.iter (fun (source, target) ->\n    let src_func = List.find_opt (fun f -> f.name = source) functions in\n    let dst_func = List.find_opt (fun f -> f.name = target) functions in\n    let src_include = match max_complexity, src_func with\n      | Some threshold, Some f -> f.complexity_score <= threshold\n      | None, Some _ -> true\n      | _ -> false\n    in\n    let dst_include = match max_complexity, dst_func with\n      | Some threshold, Some f -> f.complexity_score <= threshold\n      | None, Some _ -> true\n      | _ -> false\n    in\n    if src_include && dst_include then\n      Buffer.add_string buffer (Printf.sprintf \"    %s --> %s\\n\" source target)\n  ) enhanced_graph.graph.edges;\n  \n  List.iter (fun func ->\n    let should_include = match max_complexity with\n      | Some threshold -> func.complexity_score <= threshold\n      | None -> true\n    in\n    if should_include then\n      Buffer.add_string buffer (Printf.sprintf \"    click %s callback \\\"Show details for %s\\\"\\n\" \n        func.name func.name)\n  ) functions;\n  \n  Buffer.add_string buffer \"\\n\";\n  Buffer.add_string buffer \"    classDef low-complexity fill:#d4edda,stroke:#28a745,stroke-width:2px\\n\";\n  Buffer.add_string buffer \"    classDef medium-complexity fill:#fff3cd,stroke:#ffc107,stroke-width:2px\\n\";\n  Buffer.add_string buffer \"    classDef high-complexity fill:#f8d7da,stroke:#dc3545,stroke-width:2px\\n\";\n  \n  Buffer.contents buffer",
+        "parameters": [
+          { "name": "enhanced_graph", "type": null },
+          { "name": "max_complexity", "type": null },
+          { "name": "show_modules", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Generate Mermaid diagram syntax",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "generate_visualization_data",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 181,
+        "end_line": 199,
+        "source_code": "let generate_visualization_data analysis =\n  let docs_map = extract_all_docs analysis in\n  let enhanced_graph = create_enhanced_call_graph analysis in\n  \n  let main_diagram = generate_mermaid_diagram enhanced_graph () in\n  \n  `Assoc [\n    (\"analysis\", enhanced_call_graph_to_json enhanced_graph docs_map);\n    (\"diagrams\", `Assoc [\n      (\"main\", `String main_diagram);\n    ]);\n    (\"metadata\", `Assoc [\n      (\"total_functions\", `Int (List.length analysis.functions));\n      (\"total_modules\", `Int (List.length analysis.modules));\n      (\"entry_point_count\", `Int (List.length enhanced_graph.entry_points));\n      (\"cycle_count\", `Int (List.length enhanced_graph.cycles));\n      (\"generated_at\", `String (Printf.sprintf \"%.0f\" (Unix.time ())));\n    ]);\n  ]",
+        "parameters": [ { "name": "analysis", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Generate complete visualization data package",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "save_visualization_data",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 202,
+        "end_line": 208,
+        "source_code": "let save_visualization_data analysis output_file =\n  let data = generate_visualization_data analysis in\n  let json_string = pretty_to_string data in\n  let oc = open_out output_file in\n  output_string oc json_string;\n  close_out oc;\n  Printf.printf \"Visualization data saved to %s\\n\" output_file",
+        "parameters": [
+          { "name": "analysis", "type": null },
+          { "name": "output_file", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Save visualization data to file",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "generate_source_data",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 211,
+        "end_line": 229,
+        "source_code": "let generate_source_data filenames =\n  let source_map = List.fold_left (fun acc filename ->\n    try\n      let content = \n        let ic = open_in filename in\n        let content = really_input_string ic (in_channel_length ic) in\n        close_in ic;\n        content\n      in\n      (filename, content) :: acc\n    with\n    | _ -> acc\n  ) [] filenames in\n  \n  `Assoc [\n    (\"files\", `Assoc (List.map (fun (filename, content) -> \n      (filename, `String content)\n    ) source_map));\n  ]",
+        "parameters": [ { "name": "filenames", "type": null } ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Generate source code data for viewer",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      },
+      {
+        "name": "export_complete_visualization",
+        "location": {
+          "file": "unknown",
+          "start_line": 1,
+          "start_col": 0,
+          "end_line": 1,
+          "end_col": 0
+        },
+        "start_line": 232,
+        "end_line": 248,
+        "source_code": "let export_complete_visualization filenames output_dir =\n  let analysis = analyze_files filenames in\n  \n  (try Unix.mkdir output_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());\n  \n  let viz_file = Filename.concat output_dir \"visualization.json\" in\n  save_visualization_data analysis viz_file;\n  \n  let source_data = generate_source_data filenames in\n  let source_file = Filename.concat output_dir \"source_data.json\" in\n  let oc = open_out source_file in\n  output_string oc (pretty_to_string source_data);\n  close_out oc;\n  \n  Printf.printf \"Complete visualization data exported to %s/\\n\" output_dir;\n  \n  analysis",
+        "parameters": [
+          { "name": "filenames", "type": null },
+          { "name": "output_dir", "type": null }
+        ],
+        "return_type": null,
+        "complexity_score": 1,
+        "calls": [],
+        "is_recursive": false,
+        "module_path": [],
+        "documentation": {
+          "summary": "Complete export function",
+          "description": null,
+          "parameters": [],
+          "returns": null,
+          "examples": [],
+          "see_also": [],
+          "since": null,
+          "deprecated": null,
+          "raises": [],
+          "tags": []
+        },
+        "file": "unknown"
+      }
+    ],
+    "edges": [],
+    "entry_points": [
+      "get_function_info", "save_visualization_data", "extract_source_code",
+      "function_to_json", "analyze_structure_item", "find_callers",
+      "analyze_file", "extract_calls", "analyze_files",
+      "generate_source_data", "generate_visualization_data",
+      "export_complete_visualization", "calculate_complexity", "doc_to_json",
+      "generate_mermaid_diagram", "find_callees", "extract_parameters",
+      "enhanced_call_graph_to_json", "extract_doc_attribute",
+      "location_to_json", "process_value_binding"
+    ],
+    "cycles": [],
+    "complexity_stats": { "min": 1, "max": 1, "average": 1.0 }
+  },
+  "diagrams": {
+    "main": "%%{init: {\"flowchart\": {\"defaultRenderer\": \"elk\"}} }%%\nflowchart TD\n    extract_doc_attribute[\"extract_doc_attribute\"]:::low-complexity\n    extract_source_code[\"extract_source_code\"]:::low-complexity\n    calculate_complexity[\"calculate_complexity\"]:::low-complexity\n    extract_calls[\"extract_calls\"]:::low-complexity\n    extract_parameters[\"extract_parameters\"]:::low-complexity\n    process_value_binding[\"process_value_binding\"]:::low-complexity\n    analyze_structure_item[\"analyze_structure_item\"]:::low-complexity\n    analyze_file[\"analyze_file\"]:::low-complexity\n    analyze_files[\"analyze_files\"]:::low-complexity\n    find_callers[\"find_callers\"]:::low-complexity\n    find_callees[\"find_callees\"]:::low-complexity\n    get_function_info[\"get_function_info\"]:::low-complexity\n    location_to_json[\"location_to_json\"]:::low-complexity\n    doc_to_json[\"doc_to_json\"]:::low-complexity\n    function_to_json[\"function_to_json\"]:::low-complexity\n    enhanced_call_graph_to_json[\"enhanced_call_graph_to_json\"]:::low-complexity\n    generate_mermaid_diagram[\"generate_mermaid_diagram\"]:::low-complexity\n    generate_visualization_data[\"generate_visualization_data\"]:::low-complexity\n    save_visualization_data[\"save_visualization_data\"]:::low-complexity\n    generate_source_data[\"generate_source_data\"]:::low-complexity\n    export_complete_visualization[\"export_complete_visualization\"]:::low-complexity\n    click extract_doc_attribute callback \"Show details for extract_doc_attribute\"\n    click extract_source_code callback \"Show details for extract_source_code\"\n    click calculate_complexity callback \"Show details for calculate_complexity\"\n    click extract_calls callback \"Show details for extract_calls\"\n    click extract_parameters callback \"Show details for extract_parameters\"\n    click process_value_binding callback \"Show details for process_value_binding\"\n    click analyze_structure_item callback \"Show details for analyze_structure_item\"\n    click analyze_file callback \"Show details for analyze_file\"\n    click analyze_files callback \"Show details for analyze_files\"\n    click find_callers callback \"Show details for find_callers\"\n    click find_callees callback \"Show details for find_callees\"\n    click get_function_info callback \"Show details for get_function_info\"\n    click location_to_json callback \"Show details for location_to_json\"\n    click doc_to_json callback \"Show details for doc_to_json\"\n    click function_to_json callback \"Show details for function_to_json\"\n    click enhanced_call_graph_to_json callback \"Show details for enhanced_call_graph_to_json\"\n    click generate_mermaid_diagram callback \"Show details for generate_mermaid_diagram\"\n    click generate_visualization_data callback \"Show details for generate_visualization_data\"\n    click save_visualization_data callback \"Show details for save_visualization_data\"\n    click generate_source_data callback \"Show details for generate_source_data\"\n    click export_complete_visualization callback \"Show details for export_complete_visualization\"\n\n    classDef low-complexity fill:#d4edda,stroke:#28a745,stroke-width:2px\n    classDef medium-complexity fill:#fff3cd,stroke:#ffc107,stroke-width:2px\n    classDef high-complexity fill:#f8d7da,stroke:#dc3545,stroke-width:2px\n"
+  },
+  "metadata": {
+    "total_functions": 21,
+    "total_modules": 0,
+    "entry_point_count": 21,
+    "cycle_count": 0,
+    "generated_at": "1749495600"
+  }
+}
