@@ -5,6 +5,7 @@ open Exclusion_window
 open Load_balancer
 open Config
 open Database
+open System_constants
 
 type scheduling_context = {
   config: Config.t;
@@ -982,7 +983,7 @@ let determine_followup_type contact_id since_date =
 let calculate_followup_emails context =
   let schedules = ref [] in
   let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
-  let lookback_days = 35 in (* Look back 35 days for eligible emails *)
+  let lookback_days = SystemConstants.followup_lookback_days in
   
   match get_sent_emails_for_followup lookback_days with
   | Error _ -> !schedules (* Return empty list on error *)
@@ -1028,7 +1029,7 @@ let calculate_followup_emails context =
           | Error _ -> () (* Skip on error *)
           | Ok followup_type ->
               (* Schedule follow-up for configured delay after sent date *)
-              let followup_date = add_days sent_date 2 in (* Use constant instead of context.config.followup_delay_days *)
+              let followup_date = add_days sent_date SystemConstants.followup_delay_days in
               let today = current_date () in
               
               (* If follow-up is overdue, schedule for tomorrow *)

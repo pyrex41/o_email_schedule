@@ -5,6 +5,7 @@ module SystemConstants = struct
   let overage_threshold = 1.2               (* Redistribute when 20% over cap *)
   let catch_up_spread_days = 7              (* Spread overflow across 7 days *)
   let followup_lookback_days = 35           (* Look back 35 days for follow-ups *)
+  let followup_delay_days = 2               (* Default delay for follow-up emails *)
   let post_window_delay_days = 1            (* Send 1 day after exclusion ends *)
   
   (* Email priorities (could move to DB if needed) *)
