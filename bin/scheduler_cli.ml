@@ -87,7 +87,13 @@ let main () =
   );
   
   let db_path = Sys.argv.(1) in
-  let org_id = int_of_string Sys.argv.(2) in
+  let org_id = 
+    try int_of_string Sys.argv.(2)
+    with Failure _ ->
+      Printf.printf "Error: Invalid organization ID '%s'. Must be a valid integer.\n" Sys.argv.(2);
+      Printf.printf "Example: %s /app/data/contacts.sqlite3 206\n" Sys.argv.(0);
+      exit 1
+  in
   run_scheduler db_path org_id
 
 let () = main () 
