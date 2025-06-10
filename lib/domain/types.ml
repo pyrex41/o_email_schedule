@@ -133,6 +133,61 @@ let string_of_schedule_status = function
   | Processing -> "processing"
   | Sent -> "sent"
 
+(* Size profile for load balancing *)
+type size_profile = Small | Medium | Large | Enterprise
+
+let size_profile_of_string = function
+  | "small" -> Small
+  | "medium" -> Medium
+  | "large" -> Large
+  | "enterprise" -> Enterprise
+  | s -> failwith ("Unknown size profile: " ^ s)
+
+let string_of_size_profile = function
+  | Small -> "small"
+  | Medium -> "medium"
+  | Large -> "large"
+  | Enterprise -> "enterprise"
+
+(* Enhanced organization configuration from database *)
+type enhanced_organization_config = {
+  id: int;
+  name: string;
+  
+  (* Business rules *)
+  enable_post_window_emails: bool;
+  effective_date_first_email_months: int;
+  exclude_failed_underwriting_global: bool;
+  send_without_zipcode_for_universal: bool;
+  pre_exclusion_buffer_days: int;
+  
+  (* Customer preferences *)
+  birthday_days_before: int;
+  effective_date_days_before: int;
+  send_time_hour: int;
+  send_time_minute: int;
+  timezone: string;
+  
+  (* Communication limits *)
+  max_emails_per_period: int;
+  frequency_period_days: int;
+  
+  (* Size-based tuning *)
+  size_profile: size_profile;
+  
+  (* Optional overrides *)
+  config_overrides: (string * Yojson.Safe.t) list option;
+}
+
+(* Load balancing configuration computed from size profile *)
+type computed_load_balancing_config = {
+  daily_send_percentage_cap: float;
+  ed_daily_soft_limit: int;
+  ed_smoothing_window_days: int;
+  batch_size: int;
+  total_contacts: int;  (* Computed at runtime *)
+}
+
 let priority_of_email_type = function
   | Anniversary Birthday -> 10
   | Anniversary EffectiveDate -> 20
@@ -247,7 +302,7 @@ type distribution_analysis = {
   distribution_variance: int;
 }
 
-(* Organization-level configuration for scheduling flexibility *)
+(* Legacy organization-level configuration for backward compatibility *)
 type organization_config = {
   enable_post_window_emails: bool;
   effective_date_first_email_months: int;

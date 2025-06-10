@@ -12,27 +12,33 @@ let db_path = ref "org-206.sqlite3"
  * Purpose:
  *   Configures the SQLite database file location for all subsequent database
  *   operations, enabling environment-specific database configuration.
+ *   Closes any open connection to avoid connection caching issues.
  * 
  * Parameters:
  *   - path: String path to SQLite database file
  * 
  * Returns:
- *   Unit (side effect: updates global database path reference)
+ *   Unit (side effect: updates global database path reference and closes old connection)
  * 
  * Business Logic:
  *   - Updates global database path configuration
  *   - Enables switching between development, test, and production databases
  *   - Must be called before database operations in different environments
+ *   - Closes any open connection to ensure correct database is used
  * 
  * Usage Example:
  *   Called during application initialization to set environment-specific database
  * 
  * Error Cases:
- *   - None expected (simple reference assignment)
+ *   - None expected (simple reference assignment and connection close)
  * 
  * @integration_point
  *)
-let set_db_path path = db_path := path
+let set_db_path path =
+  if !db_path <> path then (
+    close_database (); (* Close any open connection *)
+    db_path := path
+  )
 
 (* Error handling with Result types *)
 type db_error = 
@@ -74,7 +80,19 @@ let string_of_db_error = function
 (* Get or create database connection *)
 let get_db_connection () =
   match !db_handle with
-  | Some db -> Ok db
+  | Some db ->
+      (* Check if the connection is to the correct path *)
+      let db_filename = Sqlite3.db_filename db "main" in
+      if db_filename = Some !db_path then Ok db
+      else (
+        close_database ();
+        try
+          let db = Sqlite3.db_open !db_path in
+          db_handle := Some db;
+          Ok db
+        with Sqlite3.Error msg ->
+          Error (ConnectionError msg)
+      )
   | None ->
       try
         let db = Sqlite3.db_open !db_path in
@@ -1371,3 +1389,99 @@ let get_contacts_for_campaign campaign_instance =
   | Ok all_contacts ->
       let filtered_contacts = List.filter (fun contact -> contact_matches_targeting contact campaign_instance) all_contacts in
       Ok filtered_contacts
+
+(* Parse organization configuration from database row *)
+let parse_organization_config_row = function
+  | [id_str; name; enable_post_window; ed_months; exclude_failed_uw; send_without_zip;
+     pre_buffer; birthday_before; ed_before; send_hour; send_minute; timezone;
+     max_per_period; period_days; size_profile; config_overrides] ->
+      (try
+        let config_overrides_parsed = 
+          if config_overrides = "" || config_overrides = "NULL" then None
+          else 
+            (try Some (Yojson.Safe.from_string config_overrides |> Yojson.Safe.Util.to_assoc)
+             with _ -> None)
+        in
+        Some {
+          id = int_of_string id_str;
+          name;
+          enable_post_window_emails = (enable_post_window = "1");
+          effective_date_first_email_months = int_of_string ed_months;
+          exclude_failed_underwriting_global = (exclude_failed_uw = "1");
+          send_without_zipcode_for_universal = (send_without_zip = "1");
+          pre_exclusion_buffer_days = int_of_string pre_buffer;
+          birthday_days_before = int_of_string birthday_before;
+          effective_date_days_before = int_of_string ed_before;
+          send_time_hour = int_of_string send_hour;
+          send_time_minute = int_of_string send_minute;
+          timezone;
+          max_emails_per_period = int_of_string max_per_period;
+          frequency_period_days = int_of_string period_days;
+          size_profile = size_profile_of_string size_profile;
+          config_overrides = config_overrides_parsed;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Execute SQL query on central database replica without modifying global state *)
+let execute_central_db_query query =
+  let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
+    |> Option.value ~default:"sync-service/data/central_replica.db" in
+  try
+    let central_db = Sqlite3.db_open central_db_path in
+    let rows = ref [] in
+    let callback row _headers =
+      let row_data = Array.to_list (Array.map (function Some s -> s | None -> "") row) in
+      rows := row_data :: !rows
+    in
+    let result = match Sqlite3.exec central_db ~cb:callback query with
+      | Sqlite3.Rc.OK -> Ok (List.rev !rows)
+      | rc -> Error (SqliteError (Sqlite3.Rc.to_string rc))
+    in
+    ignore (Sqlite3.db_close central_db);
+    result
+  with Sqlite3.Error msg ->
+    Error (SqliteError msg)
+
+(* Load organization configuration from central database replica *)
+let load_organization_config org_id =
+  let query = Printf.sprintf {|
+    SELECT id, name,
+           enable_post_window_emails, effective_date_first_email_months,
+           exclude_failed_underwriting_global, send_without_zipcode_for_universal,
+           pre_exclusion_buffer_days, birthday_days_before, effective_date_days_before,
+           send_time_hour, send_time_minute, timezone,
+           max_emails_per_period, frequency_period_days,
+           size_profile, COALESCE(config_overrides, '{}') as config_overrides
+    FROM organizations
+    WHERE id = %d AND active = 1
+  |} org_id in
+  
+  match execute_central_db_query query with
+  | Error err -> Error err
+  | Ok [row] -> 
+      (match parse_organization_config_row row with
+       | Some config -> Ok config
+       | None -> Error (ParseError "Failed to parse organization config"))
+  | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
+  | Ok _ -> Error (ParseError "Multiple organizations found")
+
+(* Get state-specific buffer override if exists *)
+let get_state_buffer_override org_id state =
+  let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
+    |> Option.value ~default:"sync-service/data/central_replica.db" in
+  try
+    let central_db = Sqlite3.db_open central_db_path in
+    let stmt = Sqlite3.prepare central_db "SELECT pre_exclusion_buffer_days FROM organization_state_buffers WHERE org_id = ? AND state_code = ?" in
+    ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int org_id)));
+    ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT (string_of_state state)));
+    let result = match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+          let buffer_str = Sqlite3.column stmt 0 in
+          (try Some (int_of_string buffer_str) with _ -> None)
+      | _ -> None
+    in
+    ignore (Sqlite3.finalize stmt);
+    ignore (Sqlite3.db_close central_db);
+    result
+  with Sqlite3.Error _ -> None
