@@ -9,4 +9,12 @@
   yojson
   re
   unix
-  fmt))
+  fmt
+  str))
+
+(modules
+ ast_analyzer
+ call_graph
+ doc_extractor
+ json_serializer
+ hybrid_config_bridge)

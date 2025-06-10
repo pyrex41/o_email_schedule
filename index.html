@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔄 Hybrid Configuration System Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* CSS Reset and Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #10b981;
+            --accent-color: #f59e0b;
+            --background-color: #f8fafc;
+            --surface-color: #ffffff;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            
+            /* Node colors */
+            --database-color: #0ea5e9;
+            --loader-color: #8b5cf6;
+            --counter-color: #10b981;
+            --calculator-color: #f59e0b;
+            --config-color: #ec4899;
+            --processor-color: #06b6d4;
+            --validator-color: #f97316;
+            --balancer-color: #84cc16;
+            
+            /* Complexity colors */
+            --low-complexity: #22c55e;
+            --medium-complexity: #eab308;
+            --high-complexity: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Layout */
+        .hybrid-config-visualizer {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .app-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="50" cy="50" r="1" fill="%23ffffff" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.1;
+        }
+
+        .app-header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .app-header .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }
+
+        .app-main {
+            display: grid;
+            grid-template-columns: 320px 1fr 400px;
+            flex: 1;
+            gap: 1rem;
+            padding: 1rem;
+            max-height: calc(100vh - 140px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--surface-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            padding: 1.5rem;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+        }
+
+        .controls-section,
+        .example-orgs-section,
+        .system-info-section,
+        .legend-section {
+            margin-bottom: 2rem;
+        }
+
+        .controls-section h3,
+        .example-orgs-section h3,
+        .system-info-section h3,
+        .legend-section h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .view-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .view-buttons button {
+            padding: 0.75rem 1rem;
+            border: 2px solid var(--border-color);
+            background: var(--surface-color);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+        }
+
+        .view-buttons button:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: rgba(37, 99, 235, 0.05);
+        }
+
+        .view-buttons button.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .filter-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .filter-controls label {
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .filter-controls select {
+            padding: 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--surface-color);
+            color: var(--text-primary);
+            margin-top: 0.25rem;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            accent-color: var(--primary-color);
+        }
+
+        /* Organization Examples */
+        .org-examples {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .org-example {
+            padding: 0.75rem 1rem;
+            border: 2px solid var(--border-color);
+            background: var(--surface-color);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+            font-weight: 500;
+        }
+
+        .org-example:hover {
+            border-color: var(--secondary-color);
+            color: var(--secondary-color);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .org-example.active {
+            background: var(--secondary-color);
+            color: white;
+            border-color: var(--secondary-color);
+        }
+
+        .org-config-display {
+            background: rgba(16, 185, 129, 0.05);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .org-config-display h4 {
+            color: var(--secondary-color);
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+
+        .config-details {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .config-detail {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .config-detail .label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .config-detail .value {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* System Info */
+        .system-constants,
+        .priorities {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .system-constant,
+        .priority-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            background: rgba(99, 102, 241, 0.05);
+            border-radius: 6px;
+        }
+
+        .priority-item {
+            background: rgba(245, 158, 11, 0.05);
+        }
+
+        .priority-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .system-constant .label,
+        .priority-item .label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .system-constant .value,
+        .priority-item .value {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Legend */
+        .legend-items {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem;
+            border-radius: 6px;
+            background: rgba(148, 163, 184, 0.05);
+        }
+
+        .legend-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 2px solid;
+        }
+
+        .legend-indicator.database-node {
+            background-color: rgba(14, 165, 233, 0.2);
+            border-color: var(--database-color);
+        }
+
+        .legend-indicator.loader-node {
+            background-color: rgba(139, 92, 246, 0.2);
+            border-color: var(--loader-color);
+        }
+
+        .legend-indicator.counter-node {
+            background-color: rgba(16, 185, 129, 0.2);
+            border-color: var(--counter-color);
+        }
+
+        .legend-indicator.calculator-node {
+            background-color: rgba(245, 158, 11, 0.2);
+            border-color: var(--calculator-color);
+        }
+
+        .legend-indicator.processor-node {
+            background-color: rgba(6, 182, 212, 0.2);
+            border-color: var(--processor-color);
+        }
+
+        .legend-indicator.low-complexity {
+            background-color: rgba(34, 197, 94, 0.2);
+            border-color: var(--low-complexity);
+        }
+
+        .legend-indicator.medium-complexity {
+            background-color: rgba(234, 179, 8, 0.2);
+            border-color: var(--medium-complexity);
+        }
+
+        .legend-indicator.high-complexity {
+            background-color: rgba(239, 68, 68, 0.2);
+            border-color: var(--high-complexity);
+        }
+
+        .legend-indicator.selected {
+            background-color: rgba(255, 235, 59, 0.4);
+            border-color: #f57f17;
+        }
+
+        /* Visualization Container */
+        .visualization-container {
+            background: var(--surface-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .visualization-header {
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .visualization-header h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .visualization-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .visualization-actions button {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            background: var(--surface-color);
+            color: var(--text-secondary);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .visualization-actions button:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: rgba(37, 99, 235, 0.05);
+        }
+
+        .mermaid-container {
+            flex: 1;
+            padding: 2rem;
+            overflow: auto;
+            background: radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 40%, rgba(120, 200, 255, 0.1) 0%, transparent 50%);
+        }
+
+        #mermaid-diagram {
+            width: 100%;
+            height: 100%;
+            min-height: 600px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Details Panel */
+        .details-panel {
+            background: var(--surface-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            max-height: calc(100vh - 180px);
+        }
+
+        .details-header {
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(245, 158, 11, 0.05) 100%);
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .details-header h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .close-button {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            width: 2rem;
+            height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .close-button:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .details-content {
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .description {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+
+        .module-info,
+        .complexity-info {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: rgba(99, 102, 241, 0.05);
+            border-radius: 6px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .complexity-info {
+            background: rgba(245, 158, 11, 0.05);
+            border-left-color: var(--accent-color);
+        }
+
+        .details-list {
+            margin-bottom: 1.5rem;
+        }
+
+        .details-list h4 {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.75rem;
+        }
+
+        .details-list ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .details-list li {
+            padding: 0.5rem 0.75rem;
+            margin-bottom: 0.25rem;
+            background: rgba(148, 163, 184, 0.05);
+            border-radius: 4px;
+            border-left: 3px solid var(--secondary-color);
+        }
+
+        .related-nodes h4 {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.75rem;
+        }
+
+        .related-node-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .related-node-button {
+            padding: 0.5rem 0.75rem;
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary-color);
+            border: 1px solid rgba(37, 99, 235, 0.2);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .related-node-button:hover {
+            background: var(--primary-color);
+            color: white;
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Loading and Error States */
+        .loading,
+        .error {
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .error {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.05);
+            border-radius: 8px;
+            margin: 1rem;
+        }
+
+        /* Complexity Classes */
+        .low-complexity {
+            color: var(--low-complexity) !important;
+        }
+
+        .medium-complexity {
+            color: var(--medium-complexity) !important;
+        }
+
+        .high-complexity {
+            color: var(--high-complexity) !important;
+        }
+
+        /* Mermaid Diagram Styling */
+        .mermaid {
+            background: transparent !important;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .app-main {
+                grid-template-columns: 280px 1fr;
+                gap: 1rem;
+            }
+
+            .details-panel {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                width: 350px;
+                z-index: 1000;
+                max-height: calc(100vh - 40px);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .app-main {
+                grid-template-columns: 1fr;
+                padding: 0.5rem;
+            }
+
+            .sidebar {
+                order: 2;
+                margin-top: 1rem;
+            }
+
+            .visualization-container {
+                order: 1;
+            }
+
+            .details-panel {
+                position: fixed;
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+                max-height: calc(100vh - 20px);
+            }
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--background-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Animation for smooth transitions */
+        * {
+            transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        /* Focus states for accessibility */
+        button:focus,
+        select:focus,
+        input:focus {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    
+    <script>
+        // Initialize Mermaid
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#2563eb',
+                primaryTextColor: '#1e293b',
+                primaryBorderColor: '#2563eb',
+                lineColor: '#64748b',
+                secondaryColor: '#10b981',
+                tertiaryColor: '#f59e0b',
+                background: '#ffffff',
+                mainBkg: '#ffffff',
+                secondBkg: '#f8fafc',
+                tertiaryBkg: '#f1f5f9'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            securityLevel: 'loose'
+        });
+
+        // Function to render Mermaid diagrams
+        function renderMermaidDiagram() {
+            const diagramElement = document.getElementById('mermaid-diagram');
+            const diagramData = diagramElement.getAttribute('data-diagram');
+            
+            if (diagramData && diagramData.trim() !== '') {
+                diagramElement.innerHTML = '';
+                
+                try {
+                    mermaid.render('mermaid-svg', diagramData, (svgCode) => {
+                        diagramElement.innerHTML = svgCode;
+                        
+                        // Add click handlers for interactivity
+                        const svg = diagramElement.querySelector('svg');
+                        if (svg) {
+                            svg.style.maxWidth = '100%';
+                            svg.style.height = 'auto';
+                            
+                            // Add zoom and pan functionality
+                            svg.style.cursor = 'grab';
+                            
+                            let isPanning = false;
+                            let startPoint = { x: 0, y: 0 };
+                            let endPoint = { x: 0, y: 0 };
+                            
+                            svg.addEventListener('mousedown', (e) => {
+                                isPanning = true;
+                                startPoint = { x: e.clientX, y: e.clientY };
+                                svg.style.cursor = 'grabbing';
+                            });
+                            
+                            svg.addEventListener('mousemove', (e) => {
+                                if (!isPanning) return;
+                                
+                                endPoint = { x: e.clientX, y: e.clientY };
+                                // Implement panning logic here
+                            });
+                            
+                            svg.addEventListener('mouseup', () => {
+                                isPanning = false;
+                                svg.style.cursor = 'grab';
+                            });
+                            
+                            // Add wheel zoom
+                            svg.addEventListener('wheel', (e) => {
+                                e.preventDefault();
+                                const scale = e.deltaY > 0 ? 0.9 : 1.1;
+                                const currentTransform = svg.style.transform || 'scale(1)';
+                                const currentScale = parseFloat(currentTransform.match(/scale\(([\d.]+)\)/)?.[1] || '1');
+                                const newScale = Math.max(0.1, Math.min(3, currentScale * scale));
+                                svg.style.transform = `scale(${newScale})`;
+                            });
+                        }
+                    });
+                } catch (error) {
+                    console.error('Error rendering Mermaid diagram:', error);
+                    diagramElement.innerHTML = '<div style="padding: 2rem; text-align: center; color: #ef4444;">Error rendering diagram</div>';
+                }
+            }
+        }
+
+        // Observer for diagram changes
+        const observer = new MutationObserver(() => {
+            renderMermaidDiagram();
+        });
+
+        // Start observing when the app loads
+        document.addEventListener('DOMContentLoaded', () => {
+            const diagramElement = document.getElementById('mermaid-diagram');
+            if (diagramElement) {
+                observer.observe(diagramElement, {
+                    attributes: true,
+                    attributeFilter: ['data-diagram']
+                });
+                
+                // Initial render
+                setTimeout(renderMermaidDiagram, 100);
+            }
+        });
+
+        // Global callback function for Mermaid click events
+        window.callback = function(nodeId) {
+            console.log('Node clicked:', nodeId);
+            // This will be handled by the Elm app
+            if (window.elmApp && window.elmApp.ports && window.elmApp.ports.nodeClicked) {
+                window.elmApp.ports.nodeClicked.send(nodeId);
+            }
+        };
+    </script>
+    
+    <script src="./elm.js"></script>
+    <script>
+        // Initialize the Elm app
+        const app = Elm.Main.init({
+            node: document.getElementById('app')
+        });
+        
+        // Store reference for global access
+        window.elmApp = app;
+        
+        // Handle any ports if needed
+        if (app.ports) {
+            // Example: Listen for diagram updates
+            if (app.ports.diagramUpdated) {
+                app.ports.diagramUpdated.subscribe(() => {
+                    setTimeout(renderMermaidDiagram, 50);
+                });
+            }
+        }
+    </script>
+</body>
+</html>

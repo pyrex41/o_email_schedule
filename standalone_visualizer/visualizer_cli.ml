@@ -1,6 +1,7 @@
 open Cmdliner
 open Visualizer.Ast_analyzer
 open Visualizer.Json_serializer
+open Visualizer.Hybrid_config_bridge
 
 (** Take first n elements from a list *)
 let rec take n = function
@@ -16,6 +17,7 @@ type config = {
   serve : bool;
   verbose : bool;
   max_complexity : int option;
+  hybrid_config : bool;
 }
 
 (** Default configuration *)
@@ -26,6 +28,7 @@ let default_config = {
   serve = false;
   verbose = false;
   max_complexity = None;
+  hybrid_config = false;
 }
 
 (** Find OCaml files recursively in a directory *)
@@ -143,33 +146,63 @@ let run_analysis config =
   (* Ensure opam environment is loaded *)
   let _ = Sys.command "eval $(opam env) 2>/dev/null" in
   
-  (* Run the analysis *)
-  let analysis = analyze_files config.input_files in
-  
-  if config.verbose then begin
-    Printf.printf "Analysis complete. Found %d functions.\n" (List.length analysis.functions);
-    if List.length analysis.errors > 0 then
-      Printf.printf "Encountered %d errors during analysis.\n" (List.length analysis.errors)
-  end;
-  
-  (* Generate visualization data *)
-  let result = export_complete_visualization config.input_files config.output_dir in
-  
-  (* Copy web assets *)
-  copy_web_assets config.output_dir;
-  
-  (* Print summary *)
-  print_summary result config;
-  
-  (* Start web server if requested *)
-  if config.serve then begin
-    let port = Option.value config.web_port ~default:8000 in
-    start_server config.output_dir port
+  (* Check if hybrid configuration visualization is requested *)
+  if config.hybrid_config then begin
+    Printf.printf "🔄 Generating Hybrid Configuration System Visualization...\n";
+    let analysis = generate_hybrid_visualization_cli 
+      config.input_files 
+      config.output_dir 
+      (Option.value config.web_port ~default:8000)
+      config.serve
+    in
+    
+    print_summary analysis config;
+    
+    if not config.serve then begin
+      Printf.printf "\n🚀 Hybrid Configuration Visualizer Instructions:\n";
+      Printf.printf "1. Install Elm (if not already installed):\n";
+      Printf.printf "   npm install -g elm\n";
+      Printf.printf "2. Compile the Elm application:\n";
+      Printf.printf "   cd %s && elm make src/Main.elm --output=elm.js\n" config.output_dir;
+      Printf.printf "3. Start the development server:\n";
+      Printf.printf "   cd %s && python3 -m http.server %d\n" config.output_dir (Option.value config.web_port ~default:8000);
+      Printf.printf "4. Open http://localhost:%d in your browser\n" (Option.value config.web_port ~default:8000);
+      Printf.printf "\n✨ Features:\n";
+      Printf.printf "   • Interactive data flow visualization\n";
+      Printf.printf "   • Expandable decision tree\n";
+      Printf.printf "   • Function call graph integration\n";
+      Printf.printf "   • Configuration flow analysis\n";
+      Printf.printf "   • Size profile comparisons\n";
+    end
   end else begin
-    let port = Option.value config.web_port ~default:8000 in
-    Printf.printf "To view the visualization, run:\n";
-    Printf.printf "  cd %s && python3 -m http.server %d\n" config.output_dir port;
-    Printf.printf "Then visit http://localhost:%d\n" port
+    (* Run the standard analysis *)
+    let analysis = analyze_files config.input_files in
+    
+    if config.verbose then begin
+      Printf.printf "Analysis complete. Found %d functions.\n" (List.length analysis.functions);
+      if List.length analysis.errors > 0 then
+        Printf.printf "Encountered %d errors during analysis.\n" (List.length analysis.errors)
+    end;
+    
+    (* Generate visualization data *)
+    let result = export_complete_visualization config.input_files config.output_dir in
+    
+    (* Copy web assets *)
+    copy_web_assets config.output_dir;
+    
+    (* Print summary *)
+    print_summary result config;
+    
+    (* Start web server if requested *)
+    if config.serve then begin
+      let port = Option.value config.web_port ~default:8000 in
+      start_server config.output_dir port
+    end else begin
+      let port = Option.value config.web_port ~default:8000 in
+      Printf.printf "To view the visualization, run:\n";
+      Printf.printf "  cd %s && python3 -m http.server %d\n" config.output_dir port;
+      Printf.printf "Then visit http://localhost:%d\n" port
+    end
   end
 
 (** Command line argument definitions *)
@@ -197,8 +230,12 @@ let max_complexity =
   let doc = "Filter functions by maximum complexity" in
   Arg.(value & opt (some int) None & info ["c"; "max-complexity"] ~docv:"N" ~doc)
 
+let hybrid_config =
+  let doc = "Generate hybrid configuration system visualization (interactive Elm app)" in
+  Arg.(value & flag & info ["hybrid"; "hybrid-config"] ~doc)
+
 (** Build configuration from command line arguments *)
-let build_config input_files output_dir web_port serve verbose max_complexity =
+let build_config input_files output_dir web_port serve verbose max_complexity hybrid_config =
   let collected_files = collect_input_files input_files in
   if List.length collected_files = 0 then begin
     Printf.eprintf "Error: No OCaml files found to analyze\n";
@@ -211,6 +248,7 @@ let build_config input_files output_dir web_port serve verbose max_complexity =
     serve;
     verbose;
     max_complexity;
+    hybrid_config;
   }
 
 (** Main command definition *)
@@ -218,12 +256,15 @@ let main_cmd =
   let doc = "Generate interactive visualizations for OCaml program flow" in
   let man = [
     `S Manpage.s_description;
-    `P "The OCaml Program Flow Visualizer analyzes OCaml source code to extract function definitions, call relationships, and documentation. It generates an interactive web-based visualization that allows users to explore the code structure dynamically.";
+    `P "The OCaml Program Flow Visualizer analyzes OCaml source code to extract function definitions, call relationships, and documentation. It generates interactive web-based visualizations that allow users to explore the code structure dynamically.";
+    `P "The --hybrid flag generates a specialized visualization for the hybrid configuration system architecture, showing data flow, decision trees, and configuration patterns.";
     `S Manpage.s_examples;
     `P "Analyze a single file:";
     `Pre "  $(tname) src/main.ml";
     `P "Analyze all files in a directory:";
     `Pre "  $(tname) src/";
+    `P "Generate hybrid configuration visualization:";
+    `Pre "  $(tname) --hybrid lib/";
     `P "Generate visualization and start web server:";
     `Pre "  $(tname) --serve --port 9000 src/";
     `P "Filter by complexity:";
@@ -231,7 +272,7 @@ let main_cmd =
     `S Manpage.s_see_also;
     `P "For more information, see the project documentation.";
   ] in
-  Term.(const run_analysis $ (const build_config $ input_files $ output_dir $ web_port $ serve $ verbose $ max_complexity)),
+  Term.(const run_analysis $ (const build_config $ input_files $ output_dir $ web_port $ serve $ verbose $ max_complexity $ hybrid_config)),
   Cmd.info "ocaml-visualizer" ~version:"1.0.0" ~doc ~man
 
 (** Main entry point *)
