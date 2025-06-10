@@ -1371,3 +1371,91 @@ let get_contacts_for_campaign campaign_instance =
   | Ok all_contacts ->
       let filtered_contacts = List.filter (fun contact -> contact_matches_targeting contact campaign_instance) all_contacts in
       Ok filtered_contacts
+
+(* Parse organization configuration from database row *)
+let parse_organization_config_row = function
+  | [id_str; name; enable_post_window; ed_months; exclude_failed_uw; send_without_zip;
+     pre_buffer; birthday_before; ed_before; send_hour; send_minute; timezone;
+     max_per_period; period_days; size_profile; config_overrides] ->
+      (try
+        let config_overrides_parsed = 
+          if config_overrides = "" || config_overrides = "NULL" then None
+          else 
+            (try Some (Yojson.Safe.from_string config_overrides |> Yojson.Safe.Util.to_assoc)
+             with _ -> None)
+        in
+        Some {
+          id = int_of_string id_str;
+          name;
+          enable_post_window_emails = (enable_post_window = "1");
+          effective_date_first_email_months = int_of_string ed_months;
+          exclude_failed_underwriting_global = (exclude_failed_uw = "1");
+          send_without_zipcode_for_universal = (send_without_zip = "1");
+          pre_exclusion_buffer_days = int_of_string pre_buffer;
+          birthday_days_before = int_of_string birthday_before;
+          effective_date_days_before = int_of_string ed_before;
+          send_time_hour = int_of_string send_hour;
+          send_time_minute = int_of_string send_minute;
+          timezone;
+          max_emails_per_period = int_of_string max_per_period;
+          frequency_period_days = int_of_string period_days;
+          size_profile = size_profile_of_string size_profile;
+          config_overrides = config_overrides_parsed;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Load organization configuration from central database *)
+let load_organization_config org_id =
+  (* This connects to the central Turso database, not the org-specific one *)
+  let central_db_path = Sys.getenv_opt "CENTRAL_DB_URL" |> Option.value ~default:"central.db" in
+  let saved_path = !db_path in
+  db_path := central_db_path;
+  
+  let query = Printf.sprintf {|
+    SELECT id, name,
+           enable_post_window_emails, effective_date_first_email_months,
+           exclude_failed_underwriting_global, send_without_zipcode_for_universal,
+           pre_exclusion_buffer_days, birthday_days_before, effective_date_days_before,
+           send_time_hour, send_time_minute, timezone,
+           max_emails_per_period, frequency_period_days,
+           size_profile, COALESCE(config_overrides, '{}') as config_overrides
+    FROM organizations
+    WHERE id = %d AND active = 1
+  |} org_id in
+  
+  let result = match execute_sql_safe query with
+    | Error err -> Error err
+    | Ok [row] -> 
+        (match parse_organization_config_row row with
+         | Some config -> Ok config
+         | None -> Error (ParseError "Failed to parse organization config"))
+    | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
+    | Ok _ -> Error (ParseError "Multiple organizations found")
+  in
+  
+  (* Restore original database path *)
+  db_path := saved_path;
+  result
+
+(* Get state-specific buffer override if exists *)
+let get_state_buffer_override org_id state =
+  let central_db_path = Sys.getenv_opt "CENTRAL_DB_URL" |> Option.value ~default:"central.db" in
+  let saved_path = !db_path in
+  db_path := central_db_path;
+  
+  let query = Printf.sprintf {|
+    SELECT pre_exclusion_buffer_days
+    FROM organization_state_buffers
+    WHERE org_id = %d AND state_code = '%s'
+  |} org_id (string_of_state state) in
+  
+  let result = match execute_sql_safe query with
+    | Ok [[buffer_str]] -> 
+        (try Some (int_of_string buffer_str)
+         with _ -> None)
+    | _ -> None
+  in
+  
+  db_path := saved_path;
+  result
