@@ -1405,13 +1405,28 @@ let parse_organization_config_row = function
       with _ -> None)
   | _ -> None
 
-(* Load organization configuration from central database *)
+(* Execute SQL query on central database replica without modifying global state *)
+let execute_central_db_query query =
+  let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
+    |> Option.value ~default:"sync-service/data/central_replica.db" in
+  try
+    let central_db = Sqlite3.db_open central_db_path in
+    let rows = ref [] in
+    let callback row _headers =
+      let row_data = Array.to_list (Array.map (function Some s -> s | None -> "") row) in
+      rows := row_data :: !rows
+    in
+    let result = match Sqlite3.exec central_db ~cb:callback query with
+      | Sqlite3.Rc.OK -> Ok (List.rev !rows)
+      | rc -> Error (SqliteError (Sqlite3.Rc.to_string rc))
+    in
+    ignore (Sqlite3.db_close central_db);
+    result
+  with Sqlite3.Error msg ->
+    Error (SqliteError msg)
+
+(* Load organization configuration from central database replica *)
 let load_organization_config org_id =
-  (* This connects to the central Turso database, not the org-specific one *)
-  let central_db_path = Sys.getenv_opt "CENTRAL_DB_URL" |> Option.value ~default:"central.db" in
-  let saved_path = !db_path in
-  db_path := central_db_path;
-  
   let query = Printf.sprintf {|
     SELECT id, name,
            enable_post_window_emails, effective_date_first_email_months,
@@ -1424,54 +1439,25 @@ let load_organization_config org_id =
     WHERE id = %d AND active = 1
   |} org_id in
   
-  (* Exception-safe execution with guaranteed path restoration *)
-  let result = 
-    try
-      match execute_sql_safe query with
-      | Error err -> Error err
-      | Ok [row] -> 
-          (match parse_organization_config_row row with
-           | Some config -> Ok config
-           | None -> Error (ParseError "Failed to parse organization config"))
-      | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
-      | Ok _ -> Error (ParseError "Multiple organizations found")
-    with
-    | exn -> 
-        (* Restore path before re-raising exception *)
-        db_path := saved_path;
-        raise exn
-  in
-  
-  (* Restore original database path *)
-  db_path := saved_path;
-  result
+  match execute_central_db_query query with
+  | Error err -> Error err
+  | Ok [row] -> 
+      (match parse_organization_config_row row with
+       | Some config -> Ok config
+       | None -> Error (ParseError "Failed to parse organization config"))
+  | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
+  | Ok _ -> Error (ParseError "Multiple organizations found")
 
 (* Get state-specific buffer override if exists *)
 let get_state_buffer_override org_id state =
-  let central_db_path = Sys.getenv_opt "CENTRAL_DB_URL" |> Option.value ~default:"central.db" in
-  let saved_path = !db_path in
-  db_path := central_db_path;
-  
   let query = Printf.sprintf {|
     SELECT pre_exclusion_buffer_days
     FROM organization_state_buffers
     WHERE org_id = %d AND state_code = '%s'
   |} org_id (string_of_state state) in
   
-  (* Exception-safe execution with guaranteed path restoration *)
-  let result = 
-    try
-      match execute_sql_safe query with
-      | Ok [[buffer_str]] -> 
-          (try Some (int_of_string buffer_str)
-           with _ -> None)
-      | _ -> None
-    with
-    | exn -> 
-        (* Restore path before re-raising exception *)
-        db_path := saved_path;
-        raise exn
-  in
-  
-  db_path := saved_path;
-  result
+  match execute_central_db_query query with
+  | Ok [[buffer_str]] -> 
+      (try Some (int_of_string buffer_str)
+       with _ -> None)
+  | _ -> None

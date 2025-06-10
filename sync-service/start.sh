@@ -2,11 +2,13 @@
 
 # Load environment variables from parent directory
 if [ -f "../.env" ]; then
+    echo "Loading environment variables from ../.env"
     export $(cat ../.env | grep -v '^#' | xargs)
 fi
 
 # Set default values if not provided
-export REPLICA_DB_PATH="${REPLICA_DB_PATH:-./data/central_replica.db}"
+echo "CENTRAL_REPLICA_DB_PATH: $CENTRAL_REPLICA_DB_PATH"
+export REPLICA_DB_PATH="${CENTRAL_REPLICA_DB_PATH:-./data/central_replica.db}"
 export SYNC_SERVICE_PORT="${SYNC_SERVICE_PORT:-9191}"
 
 echo "Starting Turso Sync Service..."
