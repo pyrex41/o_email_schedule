@@ -1,0 +1,12 @@
+(include_subdirs no)
+
+(library
+ (public_name scheduler.visualizer)
+ (name visualizer)
+ (libraries
+  ppxlib
+  ocamlgraph
+  yojson
+  re
+  unix
+  fmt))

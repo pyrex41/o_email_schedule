@@ -6,7 +6,8 @@
       "Bash(ls:*)",
       "Bash(opam list:*)",
       "Bash(grep:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(cp:*)"
     ],
     "deny": []
   }

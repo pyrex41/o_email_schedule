@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Email Scheduler Flow - Fixed</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            display: grid;
+            grid-template-columns: 1fr 500px;
+            height: 100vh;
+        }
+        
+        .main-content {
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .sidebar {
+            background: #2d2d2d;
+            border-left: 1px solid #444;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        h1, h2 {
+            color: #61dafb;
+        }
+        
+        .diagram-section {
+            margin-bottom: 40px;
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        .mermaid {
+            text-align: center;
+            background: white;
+            border-radius: 4px;
+            padding: 20px;
+        }
+        
+        .function-detail {
+            display: none;
+        }
+        
+        .function-detail.active {
+            display: block;
+        }
+        
+        .function-header {
+            background: #3a3a3a;
+            padding: 15px;
+            border-radius: 4px 4px 0 0;
+            border-left: 4px solid #61dafb;
+        }
+        
+        .function-name {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #61dafb;
+            margin-bottom: 10px;
+        }
+        
+        .function-file {
+            color: #ffc107;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        
+        .function-code {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 0 0 4px 4px;
+            overflow-x: auto;
+        }
+        
+        .code-section {
+            margin-bottom: 20px;
+        }
+        
+        .code-section h4 {
+            color: #4ecdc4;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        pre {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 15px;
+            overflow-x: auto;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            color: #e0e0e0;
+            white-space: pre-wrap;
+        }
+        
+        .doc-comment {
+            background: #2a3e2a;
+            border-left: 4px solid #28a745;
+            color: #a8e6cf;
+        }
+        
+        .function-signature {
+            background: #2a2a3e;
+            border-left: 4px solid #6c5ce7;
+            color: #a29bfe;
+            font-weight: bold;
+        }
+        
+        .close-btn {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            float: right;
+            margin-bottom: 15px;
+        }
+        
+        .close-btn:hover {
+            background: #ff5252;
+        }
+        
+        .welcome-message {
+            background: #3a3a3a;
+            padding: 20px;
+            border-radius: 4px;
+            text-align: center;
+            color: #999;
+        }
+        
+        .click-hint {
+            background: #4a4a2a;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            text-align: center;
+            color: #ffeb3b;
+            font-size: 0.9rem;
+        }
+        
+        .function-groups {
+            margin-bottom: 30px;
+        }
+        
+        .function-group {
+            background: #2a2a2a;
+            border: 2px solid #444;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .function-group h3 {
+            color: #61dafb;
+            margin: 0 0 15px 0;
+            font-size: 1.1rem;
+            border-bottom: 2px solid #444;
+            padding-bottom: 10px;
+        }
+        
+        .function-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        
+        .function-btn {
+            background: #3a3a3a;
+            color: #e0e0e0;
+            border: 1px solid #555;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+        
+        .function-btn.main {
+            background: #4a3a4a;
+            border: 2px solid #61dafb;
+            border-left: 4px solid #61dafb;
+        }
+        
+        .function-btn:hover {
+            background: #4a4a4a;
+            border-color: #61dafb;
+        }
+        
+        .function-btn.main:hover {
+            background: #5a4a5a;
+            transform: translateY(-1px);
+        }
+        
+        .function-btn-name {
+            font-weight: bold;
+            color: #61dafb;
+            margin-bottom: 5px;
+        }
+        
+        .function-btn-desc {
+            font-size: 0.8rem;
+            color: #999;
+        }
+        
+        /* Make SVG nodes more obviously clickable */
+        .mermaid svg g.node {
+            cursor: pointer !important;
+        }
+        
+        .mermaid svg g.node:hover rect,
+        .mermaid svg g.node:hover polygon,
+        .mermaid svg g.node:hover circle {
+            stroke: #61dafb !important;
+            stroke-width: 3px !important;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 1200px) {
+            body {
+                grid-template-columns: 1fr;
+                grid-template-rows: 1fr auto;
+            }
+            .sidebar {
+                max-height: 50vh;
+                border-left: none;
+                border-top: 1px solid #444;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-content">
+        <h1>📧 Interactive Email Scheduler Flow</h1>
+        <div class="click-hint">
+            💡 Click on any function box in the diagrams below OR use the function buttons to see code and documentation!
+        </div>
+        
+        <div class="function-groups">
+            <div class="function-group">
+                <h3>🎯 Main Orchestration</h3>
+                <div class="function-buttons">
+                    <button class="function-btn main" onclick="showFunctionDetails('schedule_emails_streaming')">
+                        <div class="function-btn-name">schedule_emails_streaming</div>
+                        <div class="function-btn-desc">Main orchestration function</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('create_context')">
+                        <div class="function-btn-name">create_context</div>
+                        <div class="function-btn-desc">Initialize scheduling context</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('manage_campaign_lifecycle')">
+                        <div class="function-btn-name">manage_campaign_lifecycle</div>
+                        <div class="function-btn-desc">Update campaign status</div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="function-group">
+                <h3>📧 Campaign Processing</h3>
+                <div class="function-buttons">
+                    <button class="function-btn main" onclick="showFunctionDetails('calculate_all_campaign_schedules')">
+                        <div class="function-btn-name">calculate_all_campaign_schedules</div>
+                        <div class="function-btn-desc">Process all campaigns</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('calculate_campaign_emails')">
+                        <div class="function-btn-name">calculate_campaign_emails</div>
+                        <div class="function-btn-desc">Individual campaign logic</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('get_active_campaign_instances')">
+                        <div class="function-btn-name">get_active_campaign_instances</div>
+                        <div class="function-btn-desc">Get active campaigns</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('get_campaign_type_config')">
+                        <div class="function-btn-name">get_campaign_type_config</div>
+                        <div class="function-btn-desc">Get campaign settings</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('get_contacts_for_campaign')">
+                        <div class="function-btn-name">get_contacts_for_campaign</div>
+                        <div class="function-btn-desc">Get eligible contacts</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('calculate_followup_emails')">
+                        <div class="function-btn-name">calculate_followup_emails</div>
+                        <div class="function-btn-desc">Follow-up emails</div>
+                    </button>
+                </div>
+                
+                <div class="diagram-section">
+                    <h4>📧 Campaign Processing Flow</h4>
+                    <div class="mermaid" id="campaign-flow">
+%%{init: {'theme': 'dark', 'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TB
+    CAMP_ALL[calculate_all_campaign_schedules]:::main
+    GET_INST[get_active_campaign_instances<br/>📊 Active Campaigns]:::database
+    GET_CONFIG[get_campaign_type_config<br/>⚙️ Campaign Settings]:::database
+    CALC_CAMP[calculate_campaign_emails<br/>📧 Generate Schedules]:::process
+    GET_CONTACTS[get_contacts_for_campaign<br/>👥 Eligible Contacts]:::database
+    VALID_CHECK[is_contact_valid_for_scheduling<br/>✓ Validate Contact]:::validate
+    EXCLUDE_CHECK[should_exclude_contact<br/>❌ Check Exclusions]:::validate
+    SPREAD_DATE[calculate_spread_date<br/>📅 Distribute Dates]:::process
+    CHECK_WINDOW[check_exclusion_window<br/>🚫 State Rules]:::rules
+    SKIP_EMAIL[should_skip_email<br/>⏭️ Skip Decision]:::rules
+    
+    CAMP_ALL --> GET_INST
+    GET_INST --> GET_CONFIG
+    GET_CONFIG --> CALC_CAMP
+    CALC_CAMP --> GET_CONTACTS
+    GET_CONTACTS --> VALID_CHECK
+    VALID_CHECK --> EXCLUDE_CHECK
+    EXCLUDE_CHECK --> SPREAD_DATE
+    CALC_CAMP --> CHECK_WINDOW
+    CHECK_WINDOW --> SKIP_EMAIL
+    
+    classDef main fill:#ff6b6b,stroke:#fff,stroke-width:3px,color:#fff
+    classDef database fill:#90caf9,stroke:#fff,stroke-width:2px,color:#333
+    classDef process fill:#95e1d3,stroke:#fff,stroke-width:2px,color:#333
+    classDef validate fill:#ffd3b6,stroke:#fff,stroke-width:2px,color:#333
+    classDef rules fill:#ffab91,stroke:#fff,stroke-width:2px,color:#333
+                    </div>
+                </div>
+            </div>
+
+            <div class="function-group">
+                <h3>🎂 Anniversary Processing</h3>
+                <div class="function-buttons">
+                    <button class="function-btn main" onclick="showFunctionDetails('calculate_schedules_for_contact')">
+                        <div class="function-btn-name">calculate_schedules_for_contact</div>
+                        <div class="function-btn-desc">Main contact processing</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('calculate_anniversary_emails')">
+                        <div class="function-btn-name">calculate_anniversary_emails</div>
+                        <div class="function-btn-desc">Birthday & effective date emails</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('calculate_post_window_emails')">
+                        <div class="function-btn-name">calculate_post_window_emails</div>
+                        <div class="function-btn-desc">Makeup emails</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('next_anniversary')">
+                        <div class="function-btn-name">next_anniversary</div>
+                        <div class="function-btn-desc">Calculate next occurrence</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('should_send_effective_date_email')">
+                        <div class="function-btn-name">should_send_effective_date_email</div>
+                        <div class="function-btn-desc">ED timing check</div>
+                    </button>
+                </div>
+                
+                <div class="diagram-section">
+                    <h4>🎂 Anniversary Email Flow</h4>
+                    <div class="mermaid" id="anniversary-flow">
+%%{init: {'theme': 'dark', 'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TB
+    ANNIV_MAIN[calculate_schedules_for_contact]:::main
+    VALID[Contact.is_valid_for_anniversary_scheduling<br/>✓ Has Email & Zip]:::validate
+    CALC_ANNIV[calculate_anniversary_emails<br/>🎂 Birthday & ED]:::process
+    CALC_POST[calculate_post_window_emails<br/>🔁 Makeup Emails]:::process
+    NEXT_ANNIV[next_anniversary<br/>📅 Next Occurrence]:::calc
+    SHOULD_SEND_ED[should_send_effective_date_email<br/>⏰ ED Timing Check]:::validate
+    CHECK_EXCL[check_exclusion_window<br/>🚫 State Rules]:::rules
+    SKIP[should_skip_email<br/>⏭️ Skip Decision]:::rules
+    
+    ANNIV_MAIN --> VALID
+    VALID --> CALC_ANNIV
+    VALID --> CALC_POST
+    CALC_ANNIV --> NEXT_ANNIV
+    CALC_ANNIV --> SHOULD_SEND_ED
+    CALC_ANNIV --> CHECK_EXCL
+    CHECK_EXCL --> SKIP
+    
+    classDef main fill:#ff6b6b,stroke:#fff,stroke-width:3px,color:#fff
+    classDef validate fill:#ffd3b6,stroke:#fff,stroke-width:2px,color:#333
+    classDef process fill:#95e1d3,stroke:#fff,stroke-width:2px,color:#333
+    classDef rules fill:#ffab91,stroke:#fff,stroke-width:2px,color:#333
+    classDef calc fill:#dcedc8,stroke:#fff,stroke-width:2px,color:#333
+                    </div>
+                </div>
+            </div>
+
+            <div class="function-group">
+                <h3>🚫 Business Rules & Validation</h3>
+                <div class="function-buttons">
+                    <button class="function-btn" onclick="showFunctionDetails('check_exclusion_window')">
+                        <div class="function-btn-name">check_exclusion_window</div>
+                        <div class="function-btn-desc">State exclusion rules</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('is_contact_valid_for_scheduling')">
+                        <div class="function-btn-name">is_contact_valid_for_scheduling</div>
+                        <div class="function-btn-desc">Validate contact</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('should_exclude_contact')">
+                        <div class="function-btn-name">should_exclude_contact</div>
+                        <div class="function-btn-desc">Check exclusions</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('should_skip_email')">
+                        <div class="function-btn-name">should_skip_email</div>
+                        <div class="function-btn-desc">Skip decision</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('calculate_spread_date')">
+                        <div class="function-btn-name">calculate_spread_date</div>
+                        <div class="function-btn-desc">Distribute dates</div>
+                    </button>
+                </div>
+                
+                <div class="diagram-section">
+                    <h4>🚫 Business Rules & Validation Flow</h4>
+                    <div class="mermaid" id="rules-flow">
+%%{init: {'theme': 'dark', 'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TB
+    CHECK_EXCL[check_exclusion_window<br/>🚫 Main Exclusion Check]:::main
+    
+    YEAR_ROUND[check_year_round_exclusion<br/>🌐 Year-Round Rules]:::rules
+    BIRTHDAY_EXCL[check_birthday_exclusion<br/>🎂 Birthday Window]:::rules
+    ED_EXCL[check_effective_date_exclusion<br/>📅 ED Window]:::rules
+    
+    VALID_CONTACT[is_contact_valid_for_scheduling<br/>✓ Contact Validation]:::validate
+    EXCLUDE_CONTACT[should_exclude_contact<br/>❌ Org-Level Exclusions]:::validate
+    SKIP_EMAIL[should_skip_email<br/>⏭️ Final Skip Decision]:::validate
+    
+    SPREAD_DATE[calculate_spread_date<br/>📊 Date Distribution]:::process
+    
+    CHECK_EXCL --> YEAR_ROUND
+    YEAR_ROUND --> BIRTHDAY_EXCL
+    BIRTHDAY_EXCL --> ED_EXCL
+    
+    VALID_CONTACT --> EXCLUDE_CONTACT
+    EXCLUDE_CONTACT --> SKIP_EMAIL
+    SKIP_EMAIL --> SPREAD_DATE
+    
+    classDef main fill:#ff6b6b,stroke:#fff,stroke-width:3px,color:#fff
+    classDef rules fill:#ffab91,stroke:#fff,stroke-width:2px,color:#333
+    classDef validate fill:#ffd3b6,stroke:#fff,stroke-width:2px,color:#333
+    classDef process fill:#95e1d3,stroke:#fff,stroke-width:2px,color:#333
+                    </div>
+                </div>
+            </div>
+
+            <div class="function-group">
+                <h3>⚖️ Post-Processing & Load Balancing</h3>
+                <div class="function-buttons">
+                    <button class="function-btn" onclick="showFunctionDetails('apply_frequency_limits')">
+                        <div class="function-btn-name">apply_frequency_limits</div>
+                        <div class="function-btn-desc">Limit email frequency</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('resolve_campaign_conflicts')">
+                        <div class="function-btn-name">resolve_campaign_conflicts</div>
+                        <div class="function-btn-desc">Resolve priorities</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('generate_post_window_for_skipped')">
+                        <div class="function-btn-name">generate_post_window_for_skipped</div>
+                        <div class="function-btn-desc">Makeup emails</div>
+                    </button>
+                    <button class="function-btn main" onclick="showFunctionDetails('distribute_schedules')">
+                        <div class="function-btn-name">distribute_schedules</div>
+                        <div class="function-btn-desc">Load balancing orchestration</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('smooth_effective_dates')">
+                        <div class="function-btn-name">smooth_effective_dates</div>
+                        <div class="function-btn-desc">Redistribute ED clusters</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('enforce_daily_caps')">
+                        <div class="function-btn-name">enforce_daily_caps</div>
+                        <div class="function-btn-desc">Apply hard limits</div>
+                    </button>
+                </div>
+                
+                <div class="diagram-section">
+                    <h4>⚖️ Load Balancing Pipeline</h4>
+                    <div class="mermaid" id="loadbalance-flow">
+%%{init: {'theme': 'dark', 'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TB
+    DIST_MAIN[distribute_schedules<br/>⚖️ Main Load Balancer]:::main
+    
+    FREQ_LIMIT[apply_frequency_limits<br/>⏱️ Email Frequency Limits]:::preprocess
+    RESOLVE_CONFLICTS[resolve_campaign_conflicts<br/>🔀 Priority Resolution]:::preprocess
+    POST_WINDOW[generate_post_window_for_skipped<br/>🔁 Makeup Emails]:::preprocess
+    
+    SMOOTH[smooth_effective_dates<br/>📊 Redistribute ED Clusters]:::balance
+    ENFORCE[enforce_daily_caps<br/>🚦 Apply Hard Limits]:::balance
+    
+    GROUP_DATE[group_by_date<br/>📅 Group Schedules]:::process
+    IDENTIFY[identify_overloaded_days<br/>⚠️ Find Peaks]:::process
+    APPLY_JITTER[apply_jitter_to_date<br/>🎲 Add Variance]:::process
+    MOVE_EXCESS[move_excess_to_next_available<br/>➡️ Redistribute]:::process
+    CATCHUP[move_to_catchup_period<br/>📆 Defer Emails]:::process
+    
+    FREQ_LIMIT --> RESOLVE_CONFLICTS
+    RESOLVE_CONFLICTS --> POST_WINDOW
+    POST_WINDOW --> DIST_MAIN
+    
+    DIST_MAIN --> SMOOTH
+    SMOOTH --> ENFORCE
+    SMOOTH --> GROUP_DATE
+    GROUP_DATE --> IDENTIFY
+    IDENTIFY --> APPLY_JITTER
+    ENFORCE --> GROUP_DATE
+    ENFORCE --> MOVE_EXCESS
+    MOVE_EXCESS --> CATCHUP
+    
+    classDef main fill:#ff6b6b,stroke:#fff,stroke-width:3px,color:#fff
+    classDef preprocess fill:#dcedc8,stroke:#fff,stroke-width:2px,color:#333
+    classDef balance fill:#b39ddb,stroke:#fff,stroke-width:2px,color:#fff
+    classDef process fill:#95e1d3,stroke:#fff,stroke-width:2px,color:#333
+                    </div>
+                </div>
+            </div>
+
+            <div class="function-group">
+                <h3>💾 Database Operations</h3>
+                <div class="function-buttons">
+                    <button class="function-btn main" onclick="showFunctionDetails('smart_batch_insert_schedules')">
+                        <div class="function-btn-name">smart_batch_insert_schedules</div>
+                        <div class="function-btn-desc">Smart database updates</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('get_existing_schedules_for_comparison')">
+                        <div class="function-btn-name">get_existing_schedules_for_comparison</div>
+                        <div class="function-btn-desc">Get existing schedules</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('find_existing_schedule')">
+                        <div class="function-btn-name">find_existing_schedule</div>
+                        <div class="function-btn-desc">Find matching schedule</div>
+                    </button>
+                    <button class="function-btn" onclick="showFunctionDetails('schedule_content_changed')">
+                        <div class="function-btn-name">schedule_content_changed</div>
+                        <div class="function-btn-desc">Detect changes</div>
+                    </button>
+                </div>
+                
+                <div class="diagram-section">
+                    <h4>💾 Database Operations Flow</h4>
+                    <div class="mermaid" id="database-flow">
+%%{init: {'theme': 'dark', 'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TB
+    SMART_INSERT[smart_batch_insert_schedules<br/>💾 Main DB Update]:::main
+    
+    GET_EXISTING[get_existing_schedules_for_comparison<br/>📊 Get Current Schedules]:::database
+    FIND_EXISTING[find_existing_schedule<br/>🔍 Find Matching Record]:::database
+    CONTENT_CHANGED[schedule_content_changed<br/>📝 Detect Changes]:::database
+    
+    NEW_SCHEDULE[INSERT New Schedule<br/>➕ Add New Record]:::insert
+    UPDATE_SCHEDULE[UPDATE Changed Schedule<br/>✏️ Modify Existing]:::update
+    PRESERVE_SCHEDULE[PRESERVE Unchanged<br/>🔒 Keep Original]:::preserve
+    
+    TRANSACTION[Begin Transaction<br/>🔄 Atomic Operation]:::control
+    COMMIT[Commit Changes<br/>✅ Finalize Updates]:::control
+    METRICS[Log Metrics<br/>📈 Track Performance]:::control
+    
+    SMART_INSERT --> GET_EXISTING
+    GET_EXISTING --> TRANSACTION
+    TRANSACTION --> FIND_EXISTING
+    FIND_EXISTING --> CONTENT_CHANGED
+    
+    CONTENT_CHANGED --> NEW_SCHEDULE
+    CONTENT_CHANGED --> UPDATE_SCHEDULE
+    CONTENT_CHANGED --> PRESERVE_SCHEDULE
+    
+    NEW_SCHEDULE --> COMMIT
+    UPDATE_SCHEDULE --> COMMIT
+    PRESERVE_SCHEDULE --> COMMIT
+    COMMIT --> METRICS
+    
+    classDef main fill:#ff6b6b,stroke:#fff,stroke-width:3px,color:#fff
+    classDef database fill:#90caf9,stroke:#fff,stroke-width:2px,color:#333
+    classDef insert fill:#4caf50,stroke:#fff,stroke-width:2px,color:#fff
+    classDef update fill:#ff9800,stroke:#fff,stroke-width:2px,color:#fff
+    classDef preserve fill:#9c27b0,stroke:#fff,stroke-width:2px,color:#fff
+    classDef control fill:#607d8b,stroke:#fff,stroke-width:2px,color:#fff
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="diagram-section">
+            <h3>🎯 Main Orchestration Flow</h3>
+                <div class="mermaid" id="main-flow">
+%%{init: {'theme': 'dark', 'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TB
+    MAIN[schedule_emails_streaming<br/>📧 Main Entry Point]:::entry
+    CONTEXT[create_context<br/>🔧 Initialize Context]:::setup
+    LIFECYCLE[manage_campaign_lifecycle<br/>🔄 Update Campaign Status]:::setup
+    CAMPAIGN_ALL[calculate_all_campaign_schedules<br/>📅 All Campaigns]:::campaign
+    FOLLOWUP[calculate_followup_emails<br/>📬 Follow-ups]:::followup
+    ANNIVERSARY[calculate_schedules_for_contact<br/>🎂 Anniversary/ED Emails]:::anniversary
+    FREQ_LIMIT[apply_frequency_limits<br/>⏱️ Limit Email Frequency]:::postprocess
+    CONFLICTS[resolve_campaign_conflicts<br/>🔀 Resolve Priorities]:::postprocess
+    POST_WINDOW[generate_post_window_for_skipped<br/>🔁 Makeup Emails]:::postprocess
+    DISTRIBUTE[distribute_schedules<br/>⚖️ Load Balance]:::loadbalance
+    SMART_UPDATE[smart_batch_insert_schedules<br/>💾 Smart DB Update]:::database
+    
+    MAIN --> CONTEXT
+    MAIN --> LIFECYCLE
+    MAIN --> CAMPAIGN_ALL
+    MAIN --> FOLLOWUP
+    MAIN --> ANNIVERSARY
+    MAIN --> FREQ_LIMIT
+    FREQ_LIMIT --> CONFLICTS
+    CONFLICTS --> POST_WINDOW
+    POST_WINDOW --> DISTRIBUTE
+    DISTRIBUTE --> SMART_UPDATE
+    
+    classDef entry fill:#ff6b6b,stroke:#fff,stroke-width:3px,color:#fff
+    classDef setup fill:#4ecdc4,stroke:#fff,stroke-width:2px,color:#fff
+    classDef campaign fill:#95e1d3,stroke:#fff,stroke-width:2px,color:#333
+    classDef followup fill:#a8e6cf,stroke:#fff,stroke-width:2px,color:#333
+    classDef anniversary fill:#ffd3b6,stroke:#fff,stroke-width:2px,color:#333
+    classDef postprocess fill:#dcedc8,stroke:#fff,stroke-width:2px,color:#333
+    classDef loadbalance fill:#b39ddb,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#90caf9,stroke:#fff,stroke-width:2px,color:#333
+            </div>
+        </div>
+
+    </div>
+
+    <div class="sidebar">
+        <div id="function-details">
+            <div class="welcome-message">
+                <h3>🔍 Function Explorer</h3>
+                <p>Click on any function box in the diagrams OR use the function buttons above to see:</p>
+                <ul style="text-align: left; display: inline-block;">
+                    <li>Complete function signature</li>
+                    <li>Full documentation</li>
+                    <li>Source code with comments</li>
+                    <li>File location and line numbers</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function code database
+        const functionData = {
+            'schedule_emails_streaming': {
+                name: 'schedule_emails_streaming',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '1271-1424',
+                signature: 'let schedule_emails_streaming ~contacts ~config ~total_contacts =',
+                documentation: `Main orchestration function for email scheduling
+
+Purpose:
+  Top-level function that coordinates all email scheduling including anniversary
+  emails, campaigns, load balancing, and provides comprehensive execution results.
+
+Parameters:
+  - contacts: List of all contacts to process for anniversary emails
+  - config: Configuration containing organization settings and timing
+  - total_contacts: Total contact count for load balancing calculations
+
+Returns:
+  Result containing batch_result with all schedules and metrics, or scheduler_error
+
+Business Logic:
+  - Creates scheduling context with run ID and load balancing config
+  - Processes campaign schedules first (independent of contact batching)
+  - Processes anniversary contacts in configurable batch sizes
+  - Combines anniversary and campaign schedules
+  - Applies load balancing distribution to final schedules
+  - Provides comprehensive metrics and error reporting`,
+                code: `let schedule_emails_streaming ~contacts ~config ~total_contacts =
+  try
+    let context = create_context config total_contacts in
+    let chunk_size = config.batch_size in
+    
+    (* Manage campaign lifecycle before scheduling *)
+    let _ = manage_campaign_lifecycle context in
+    
+    (* First, calculate all campaign schedules *)
+    let (campaign_schedules, campaign_errors) = calculate_all_campaign_schedules context in
+    
+    (* Calculate follow-up email schedules *)
+    let followup_schedules = calculate_followup_emails context in
+    
+    let rec process_chunks remaining_contacts acc_result =
+      match remaining_contacts with
+      | [] -> Ok acc_result
+      | _ ->
+          let (chunk, rest) = 
+            let rec take n lst acc =
+              if n = 0 || lst = [] then (List.rev acc, lst)
+              else match lst with
+                | h :: t -> take (n - 1) t (h :: acc)
+                | [] -> (List.rev acc, [])
+            in
+            take chunk_size remaining_contacts []
+          in
+          
+          let batch_result = process_contact_batch context chunk in
+          
+          let new_acc = {
+            schedules = batch_result.schedules @ acc_result.schedules;
+            contacts_processed = acc_result.contacts_processed + batch_result.contacts_processed;
+            emails_scheduled = acc_result.emails_scheduled + batch_result.emails_scheduled;
+            emails_skipped = acc_result.emails_skipped + batch_result.emails_skipped;
+            errors = batch_result.errors @ acc_result.errors;
+          } in
+          
+          process_chunks rest new_acc
+    in
+    
+    (* Apply frequency limits, conflicts, post-window generation *)
+    (* Load balancing with distribute_schedules *)
+    (* Return final balanced results *)
+    
+  with e ->
+    Error (UnexpectedError e)`
+            },
+            
+            'create_context': {
+                name: 'create_context',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '49-81',
+                signature: 'let create_context config total_contacts =',
+                documentation: `Creates a complete scheduling context for the current run
+
+Purpose:
+  Initializes all necessary components for email scheduling including configuration,
+  unique run ID, timing, and load balancing settings based on total contact count.
+
+Parameters:
+  - config: Configuration object containing organization settings and email timing
+  - total_contacts: Total number of contacts to be processed for load balancing calculations
+
+Returns:
+  scheduling_context record with all initialized components
+
+Business Logic:
+  - Generates unique run ID for audit trail
+  - Captures start time for performance tracking
+  - Configures load balancing based on expected volume
+  - Ensures consistent context across all scheduling operations`,
+                code: `let create_context config total_contacts =
+  let run_id = generate_run_id () in
+  let start_time = current_datetime () in
+  let load_balancing_config = default_config total_contacts in
+  { config; run_id; start_time; load_balancing_config }`
+            },
+            
+            'calculate_all_campaign_schedules': {
+                name: 'calculate_all_campaign_schedules',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '694-740',
+                signature: 'let calculate_all_campaign_schedules context =',
+                documentation: `Generates schedules for all active campaigns
+
+Purpose:
+  Orchestrates campaign email scheduling across all active campaign instances,
+  retrieving configurations and handling errors at the campaign level.
+
+Parameters:
+  - context: Scheduling context with configuration and settings
+
+Returns:
+  Tuple of (schedule_list, error_list) containing all campaign schedules and any errors
+
+Business Logic:
+  - Retrieves all active campaign instances from database
+  - For each instance, gets campaign type configuration
+  - Calls calculate_campaign_emails for schedule generation
+  - Accumulates all schedules and errors for return
+  - Continues processing even if individual campaigns fail`,
+                code: `let calculate_all_campaign_schedules context =
+  let all_schedules = ref [] in
+  let errors = ref [] in
+  
+  match get_active_campaign_instances () with
+  | Error err -> 
+      errors := (DatabaseError (string_of_db_error err)) :: !errors;
+      (!all_schedules, !errors)
+  | Ok campaign_instances ->
+      List.iter (fun campaign_instance ->
+        match get_campaign_type_config campaign_instance.campaign_type with
+        | Error err ->
+            errors := (DatabaseError (string_of_db_error err)) :: !errors
+        | Ok campaign_config ->
+            let campaign_schedules = calculate_campaign_emails context campaign_instance campaign_config in
+            all_schedules := campaign_schedules @ !all_schedules
+      ) campaign_instances;
+      (!all_schedules, !errors)`
+            },
+            
+            'calculate_campaign_emails': {
+                name: 'calculate_campaign_emails',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '256-414',
+                signature: 'let calculate_campaign_emails context campaign_instance campaign_config =',
+                documentation: `Generates email schedules for a specific campaign instance
+
+Purpose:
+  Core campaign scheduling logic that processes all eligible contacts for a campaign,
+  applies business rules, handles exclusions, and creates email schedule records.
+
+Parameters:
+  - context: Scheduling context with configuration and load balancing settings
+  - campaign_instance: Specific campaign instance with targeting and timing data
+  - campaign_config: Campaign type configuration with rules and settings
+
+Returns:
+  List of email_schedule records for all processed contacts in this campaign
+
+Business Logic:
+  - Retrieves contacts based on campaign targeting (all contacts vs specific list)
+  - Validates each contact for campaign eligibility
+  - Applies organization and campaign exclusion rules
+  - Calculates schedule dates (spread evenly vs regular timing)
+  - Handles exclusion windows if campaign respects them
+  - Creates appropriate schedule status (PreScheduled vs Skipped)`,
+                code: `let calculate_campaign_emails context campaign_instance campaign_config =
+  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+  let schedules = ref [] in
+  
+  (* Get contacts for this campaign with targeting *)
+  let contacts = 
+    if campaign_config.target_all_contacts then
+      match get_contacts_for_campaign campaign_instance with
+      | Ok contacts -> contacts
+      | Error _ -> []
+    else
+      (* Get targeted contacts from contact_campaigns table *)
+      match get_contact_campaigns_for_instance campaign_instance.id with
+      | Ok contact_campaigns -> (* resolve to actual contacts *)
+      | Error _ -> []
+  in
+  
+  List.iter (fun contact ->
+    (* Validate contact, check exclusions, calculate dates, create schedules *)
+    (* Handle spread_evenly logic, exclusion windows, etc. *)
+  ) contacts;
+  
+  !schedules`
+            },
+            
+            'calculate_anniversary_emails': {
+                name: 'calculate_anniversary_emails',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '416-537',
+                signature: 'let calculate_anniversary_emails context contact =',
+                documentation: `Generates anniversary email schedules for a contact
+
+Purpose:
+  Creates email schedules for birthday and effective date anniversaries based on
+  contact data and organization configuration, applying exclusion rules.
+
+Parameters:
+  - context: Scheduling context with configuration and timing settings
+  - contact: Contact record with birthday, effective_date, and other data
+
+Returns:
+  List of email_schedule records for anniversary emails (birthday and effective date)
+
+Business Logic:
+  - Checks organization-level failed underwriting exclusion policy
+  - Calculates next anniversary dates for birthday and effective date
+  - Applies days_before configuration for email timing
+  - Evaluates exclusion windows and creates appropriate status
+  - Handles minimum time threshold for effective date emails
+  - Creates audit trail with skip reasons when applicable`,
+                code: `let calculate_anniversary_emails context contact =
+  let today = current_date () in
+  let schedules = ref [] in
+  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+  
+  (* Check organization-level underwriting exclusion *)
+  if context.config.organization.exclude_failed_underwriting_global && contact.failed_underwriting then
+    !schedules (* Skip all anniversary emails *)
+  else (
+    (* Process birthday emails *)
+    begin match contact.birthday with
+    | Some birthday ->
+        let next_bday = next_anniversary today birthday in
+        let birthday_send_date = add_days next_bday (-context.config.birthday_days_before) in
+        
+        if not (should_skip_email contact (Anniversary Birthday) birthday_send_date) then
+          (* Create PreScheduled birthday email *)
+        else
+          (* Create Skipped birthday email with reason *)
+    | None -> ()
+    end;
+    
+    (* Process effective date emails *)
+    begin match contact.effective_date with
+    | Some ed ->
+        if should_send_effective_date_email context.config contact ed then
+          (* Similar logic for effective date emails *)
+    | None -> ()
+    end;
+    
+    !schedules
+  )`
+            },
+            
+            'check_exclusion_window': {
+                name: 'check_exclusion_window',
+                file: 'lib/rules/exclusion_window.ml',
+                lines: '143-178',
+                signature: 'let check_exclusion_window contact check_date =',
+                documentation: `Main exclusion evaluation function for comprehensive rule checking
+
+Purpose:
+  Orchestrates all exclusion rule evaluations in priority order to determine if an
+  email should be excluded for a contact on a specific date.
+
+Parameters:
+  - contact: Contact record with state, birthday, and effective_date information
+  - check_date: Date to evaluate against all applicable exclusion rules
+
+Returns:
+  exclusion_result with first applicable exclusion or NotExcluded if none apply
+
+Business Logic:
+  - Evaluates exclusions in priority order (year-round, birthday, effective date)
+  - Returns first exclusion match without checking subsequent rules
+  - Provides comprehensive state-based compliance checking
+  - Ensures regulatory compliance across all anniversary email types`,
+                code: `let check_exclusion_window contact check_date =
+  match check_year_round_exclusion contact with
+  | Excluded _ as result -> result
+  | NotExcluded ->
+      match check_birthday_exclusion contact check_date with
+      | Excluded _ as result -> result
+      | NotExcluded -> check_effective_date_exclusion contact check_date`
+            },
+            
+            'distribute_schedules': {
+                name: 'distribute_schedules',
+                file: 'lib/scheduling/load_balancer.ml',
+                lines: '498-533',
+                signature: 'let distribute_schedules schedules config =',
+                documentation: `Main load balancing orchestration function
+
+Purpose:
+  Coordinates complete load balancing pipeline applying smoothing algorithms
+  and cap enforcement to create balanced email distribution.
+
+Parameters:
+  - schedules: List of all email schedules to balance
+  - config: Load balancing configuration with all parameters
+
+Returns:
+  Result containing balanced schedules or load balancing error
+
+Business Logic:
+  - Applies effective date smoothing first for targeted redistribution
+  - Follows with daily cap enforcement for hard limit compliance
+  - Uses pipeline approach for layered load balancing
+  - Provides comprehensive error handling for all balancing operations`,
+                code: `let distribute_schedules schedules config =
+  try
+    let result = schedules
+      |> (fun s -> smooth_effective_dates s config)
+      |> (fun s -> enforce_daily_caps s config) in
+    Ok result
+  with e ->
+    Error (LoadBalancingError (Printf.sprintf "Load balancing failed: %s" (Printexc.to_string e)))`
+            },
+            
+            'smart_batch_insert_schedules': {
+                name: 'smart_batch_insert_schedules',
+                file: 'lib/db/database.ml',
+                lines: '494-651',
+                signature: 'let smart_batch_insert_schedules schedules current_run_id =',
+                documentation: `Intelligent bulk schedule update with audit preservation
+
+Purpose:
+  Flagship smart update function that minimizes database operations by detecting
+  unchanged schedules and preserving their audit trails while updating only changed content.
+
+Parameters:
+  - schedules: List of new email schedules to process
+  - current_run_id: Run identifier for new schedules
+
+Returns:
+  Result containing number of processed records or database error
+
+Business Logic:
+  - Retrieves all existing schedules for intelligent comparison
+  - Categorizes each schedule as new, changed, or unchanged
+  - INSERT for new schedules with current run_id
+  - UPDATE for changed schedules with current run_id and audit logging
+  - PRESERVE unchanged schedules with original run_id for audit continuity
+  - Uses single transaction for atomicity and performance
+  - Provides detailed metrics for monitoring and optimization`,
+                code: `let smart_batch_insert_schedules schedules current_run_id =
+  if schedules = [] then Ok 0 else (
+  
+  Printf.printf "🔍 Getting existing schedules for comparison...\\n%!";
+  match get_existing_schedules_for_comparison () with
+  | Error err -> Error err
+  | Ok existing_schedules ->
+      Printf.printf "📊 Found %d existing schedules to compare against\\n%!" (List.length existing_schedules);
+      
+      match get_db_connection () with
+      | Error err -> Error err
+      | Ok db ->
+          try
+            (* Begin transaction *)
+            let total_processed = ref 0 in
+            let unchanged_count = ref 0 in
+            let changed_count = ref 0 in
+            let new_count = ref 0 in
+            
+            (* Process each schedule with smart logic *)
+            List.iter (fun (schedule : email_schedule) ->
+              match find_existing_schedule existing_schedules schedule with
+                | None -> 
+                    (* New schedule - INSERT *)
+                    incr new_count;
+                    (* Execute INSERT SQL *)
+                | Some existing ->
+                    if schedule_content_changed existing schedule then (
+                      (* Content changed - UPDATE *)
+                      incr changed_count;
+                      (* Execute UPDATE SQL *)
+                    ) else (
+                      (* Content unchanged - preserve existing record *)
+                      incr unchanged_count;
+                      (* No database operation needed! *)
+                    )
+            ) schedules;
+            
+            Printf.printf "✅ Smart update complete: %d total, %d new, %d changed, %d unchanged\\n%!" 
+              !total_processed !new_count !changed_count !unchanged_count;
+            Ok !total_processed
+            
+          with 
+          | Sqlite3.Error msg -> Error (SqliteError msg)
+          | Failure msg -> Error (SqliteError msg)
+  )`
+            },
+            
+            // Additional functions from the flowcharts
+            'manage_campaign_lifecycle': {
+                name: 'manage_campaign_lifecycle',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '85-120',
+                signature: 'let manage_campaign_lifecycle context =',
+                documentation: `Updates campaign status and lifecycle management
+
+Purpose:
+  Manages the lifecycle of campaign instances, updating their status based on
+  current date and campaign configuration.
+
+Parameters:
+  - context: Scheduling context with configuration and timing
+
+Returns:
+  Unit - performs side effects by updating campaign status in database
+
+Business Logic:
+  - Checks if campaigns should be activated or deactivated
+  - Updates campaign instance status based on date ranges
+  - Handles campaign expiration and cleanup`,
+                code: `let manage_campaign_lifecycle context =
+  match get_active_campaign_instances () with
+  | Error _ -> ()
+  | Ok instances ->
+      List.iter (fun instance ->
+        let today = current_date () in
+        (* Update campaign status based on dates *)
+        if instance.end_date < today then
+          update_campaign_status instance.id "completed"
+      ) instances`
+            },
+            
+            'calculate_followup_emails': {
+                name: 'calculate_followup_emails',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '742-780',
+                signature: 'let calculate_followup_emails context =',
+                documentation: `Generates follow-up email schedules
+
+Purpose:
+  Creates follow-up email schedules based on previous email interactions
+  and campaign configurations.
+
+Parameters:
+  - context: Scheduling context with configuration
+
+Returns:
+  List of email_schedule records for follow-up emails
+
+Business Logic:
+  - Analyzes previous email engagement
+  - Schedules appropriate follow-up emails
+  - Respects frequency limits and exclusion windows`,
+                code: `let calculate_followup_emails context =
+  let schedules = ref [] in
+  match get_pending_followups () with
+  | Error _ -> !schedules
+  | Ok followups ->
+      List.iter (fun followup ->
+        (* Create follow-up schedule based on previous interaction *)
+        let schedule = create_followup_schedule followup context.run_id in
+        schedules := schedule :: !schedules
+      ) followups;
+      !schedules`
+            },
+            
+            'get_active_campaign_instances': {
+                name: 'get_active_campaign_instances',
+                file: 'lib/db/database.ml',
+                lines: '245-275',
+                signature: 'let get_active_campaign_instances () =',
+                documentation: `Retrieves all active campaign instances from database
+
+Purpose:
+  Fetches campaign instances that are currently active and ready for processing.
+
+Returns:
+  Result containing list of campaign_instance records or database error
+
+Business Logic:
+  - Filters by active status and current date ranges
+  - Returns campaigns ready for email generation
+  - Handles database connection errors gracefully`,
+                code: `let get_active_campaign_instances () =
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      try
+        let query = "SELECT * FROM campaign_instances WHERE status = 'active' AND start_date <= date('now')" in
+        let campaigns = Sqlite3.exec_sql db query in
+        Ok (parse_campaign_instances campaigns)
+      with
+      | Sqlite3.Error msg -> Error (SqliteError msg)`
+            },
+            
+            'get_campaign_type_config': {
+                name: 'get_campaign_type_config',
+                file: 'lib/db/database.ml',
+                lines: '276-295',
+                signature: 'let get_campaign_type_config campaign_type =',
+                documentation: `Retrieves campaign type configuration
+
+Purpose:
+  Gets the configuration settings for a specific campaign type including
+  timing, exclusions, and targeting rules.
+
+Parameters:
+  - campaign_type: String identifier for the campaign type
+
+Returns:
+  Result containing campaign_config record or database error`,
+                code: `let get_campaign_type_config campaign_type =
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      try
+        let query = Printf.sprintf "SELECT * FROM campaign_types WHERE name = '%s'" campaign_type in
+        let config_data = Sqlite3.exec_sql db query in
+        Ok (parse_campaign_config config_data)
+      with
+      | Sqlite3.Error msg -> Error (SqliteError msg)`
+            },
+            
+            'get_contacts_for_campaign': {
+                name: 'get_contacts_for_campaign',
+                file: 'lib/db/database.ml',
+                lines: '296-325',
+                signature: 'let get_contacts_for_campaign campaign_instance =',
+                documentation: `Gets eligible contacts for a campaign
+
+Purpose:
+  Retrieves contacts that are eligible for a specific campaign based on
+  targeting criteria and validation rules.
+
+Parameters:
+  - campaign_instance: Campaign instance with targeting configuration
+
+Returns:
+  Result containing list of contact records or database error`,
+                code: `let get_contacts_for_campaign campaign_instance =
+  match get_db_connection () with
+  | Error err -> Error err
+  | Ok db ->
+      try
+        let query = if campaign_instance.target_all then
+          "SELECT * FROM contacts WHERE active = 1"
+        else
+          Printf.sprintf "SELECT c.* FROM contacts c JOIN contact_campaigns cc ON c.id = cc.contact_id WHERE cc.campaign_instance_id = %d" campaign_instance.id
+        in
+        let contacts = Sqlite3.exec_sql db query in
+        Ok (parse_contacts contacts)
+      with
+      | Sqlite3.Error msg -> Error (SqliteError msg)`
+            },
+            
+            'calculate_schedules_for_contact': {
+                name: 'calculate_schedules_for_contact',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '649-692',
+                signature: 'let calculate_schedules_for_contact context contact =',
+                documentation: `Generates all email schedules for a single contact
+
+Purpose:
+  Core scheduling function that determines which emails should be sent to a contact
+  and when, based on their anniversaries, state rules, and organization policies.
+
+Parameters:
+  - context: Scheduling context containing config, run_id, and load balancing settings
+  - contact: The contact record with birthday, effective_date, state, etc.
+
+Returns:
+  Result containing list of email_schedule records or scheduler_error
+
+Business Logic:
+  - Validates contact has required data for anniversary scheduling
+  - Calculates anniversary-based emails (birthday, effective_date)
+  - Applies state exclusion windows based on contact.state
+  - Adds post-window emails if any were skipped
+  - Respects organization configuration for timing and exclusions`,
+                code: `let calculate_schedules_for_contact context contact =
+  try
+    if not (Contact.is_valid_for_anniversary_scheduling context.config.organization contact) then
+      Error (InvalidContactData { 
+        contact_id = contact.id; 
+        reason = "Contact failed anniversary scheduling validation" 
+      })
+    else
+      let anniversary_schedules = calculate_anniversary_emails context contact in
+      let post_window_schedules = calculate_post_window_emails context contact in
+      let all_schedules = anniversary_schedules @ post_window_schedules in
+      Ok all_schedules
+  with e ->
+    Error (UnexpectedError e)`
+            },
+            
+            'apply_frequency_limits': {
+                name: 'apply_frequency_limits',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '1050-1095',
+                signature: 'let apply_frequency_limits context schedules =',
+                documentation: `Applies email frequency limits to schedules
+
+Purpose:
+  Enforces organization-wide email frequency limits to prevent overwhelming
+  contacts with too many emails in a short time period.
+
+Parameters:
+  - context: Scheduling context with frequency limit configuration
+  - schedules: List of email schedules to filter
+
+Returns:
+  Tuple of (allowed_schedules, limited_schedules)
+
+Business Logic:
+  - Groups schedules by contact and date range
+  - Applies frequency limits based on organization policy
+  - Prioritizes higher-priority emails when limiting
+  - Marks excess emails as frequency-limited`,
+                code: `let apply_frequency_limits context schedules =
+  let frequency_config = context.config.frequency_limits in
+  let allowed = ref [] in
+  let limited = ref [] in
+  
+  (* Group by contact and apply limits *)
+  let contact_groups = group_schedules_by_contact schedules in
+  List.iter (fun (contact_id, contact_schedules) ->
+    let sorted_by_priority = List.sort compare_priority contact_schedules in
+    let (contact_allowed, contact_limited) = apply_contact_frequency_limit frequency_config sorted_by_priority in
+    allowed := contact_allowed @ !allowed;
+    limited := contact_limited @ !limited
+  ) contact_groups;
+  
+  (!allowed, !limited)`
+            },
+            
+            'resolve_campaign_conflicts': {
+                name: 'resolve_campaign_conflicts',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '1096-1140',
+                signature: 'let resolve_campaign_conflicts schedules =',
+                documentation: `Resolves conflicts between competing campaigns
+
+Purpose:
+  When multiple campaigns target the same contact on the same date,
+  resolves conflicts based on priority and business rules.
+
+Parameters:
+  - schedules: List of email schedules that may have conflicts
+
+Returns:
+  Tuple of (resolved_schedules, conflicted_schedules)
+
+Business Logic:
+  - Identifies scheduling conflicts by contact and date
+  - Applies priority-based resolution rules
+  - Ensures only one campaign email per contact per day
+  - Marks lower-priority emails as conflicted`,
+                code: `let resolve_campaign_conflicts schedules =
+  let resolved = ref [] in
+  let conflicted = ref [] in
+  
+  (* Group by contact and date *)
+  let date_groups = group_schedules_by_contact_date schedules in
+  List.iter (fun ((contact_id, date), date_schedules) ->
+    match date_schedules with
+    | [single] -> resolved := single :: !resolved
+    | multiple ->
+        let sorted_by_priority = List.sort compare_priority multiple in
+        let winner = List.hd sorted_by_priority in
+        let losers = List.map (mark_as_conflicted winner) (List.tl sorted_by_priority) in
+        resolved := winner :: !resolved;
+        conflicted := losers @ !conflicted
+  ) date_groups;
+  
+  (!resolved, !conflicted)`
+            },
+            
+            'generate_post_window_for_skipped': {
+                name: 'generate_post_window_for_skipped',
+                file: 'lib/scheduling/email_scheduler.ml',
+                lines: '1141-1180',
+                signature: 'let generate_post_window_for_skipped context schedules =',
+                documentation: `Creates makeup emails for skipped schedules
+
+Purpose:
+  When emails are skipped due to exclusion windows, creates makeup emails
+  to be sent during the post-exclusion window period.
+
+Parameters:
+  - context: Scheduling context with post-window configuration
+  - schedules: List of schedules including skipped ones
+
+Returns:
+  List of post-window email schedules for skipped emails
+
+Business Logic:
+  - Identifies skipped emails due to exclusion windows
+  - Calculates post-window dates when emails can be sent
+  - Creates new schedules for the post-window period
+  - Ensures compliance with state regulations`,
+                code: `let generate_post_window_for_skipped context schedules =
+  let post_window_schedules = ref [] in
+  
+  List.iter (fun schedule ->
+    match schedule.status with
+    | Skipped reason when is_exclusion_window_skip reason ->
+        (* Calculate post-window date *)
+        let post_date = calculate_post_window_date schedule.contact_id schedule.scheduled_date in
+        let post_schedule = {
+          schedule with
+          scheduled_date = post_date;
+          status = PreScheduled;
+          email_type = add_post_window_flag schedule.email_type;
+          scheduler_run_id = context.run_id;
+        } in
+        post_window_schedules := post_schedule :: !post_window_schedules
+    | _ -> ()
+  ) schedules;
+  
+  !post_window_schedules`
+            },
+            
+            'smooth_effective_dates': {
+                name: 'smooth_effective_dates',
+                file: 'lib/scheduling/load_balancer.ml',
+                lines: '125-180',
+                signature: 'let smooth_effective_dates schedules config =',
+                documentation: `Smooths effective date email clustering
+
+Purpose:
+  Redistributes effective date emails that cluster on specific dates
+  to create more even distribution across the year.
+
+Parameters:
+  - schedules: List of email schedules to smooth
+  - config: Load balancing configuration with smoothing parameters
+
+Returns:
+  List of schedules with smoothed effective date distribution
+
+Business Logic:
+  - Identifies effective date email clusters
+  - Applies jitter to spread emails across nearby dates
+  - Maintains anniversary timing while reducing peaks
+  - Preserves other email types unchanged`,
+                code: `let smooth_effective_dates schedules config =
+  let (ed_schedules, other_schedules) = partition_by_email_type schedules EffectiveDate in
+  
+  let smoothed_ed = List.map (fun schedule ->
+    let jitter_days = calculate_jitter config.jitter_range schedule.contact_id in
+    let new_date = add_days schedule.scheduled_date jitter_days in
+    { schedule with scheduled_date = new_date }
+  ) ed_schedules in
+  
+  smoothed_ed @ other_schedules`
+            },
+            
+            'enforce_daily_caps': {
+                name: 'enforce_daily_caps',
+                file: 'lib/scheduling/load_balancer.ml',
+                lines: '350-420',
+                signature: 'let enforce_daily_caps schedules config =',
+                documentation: `Enforces daily email volume caps
+
+Purpose:
+  Applies hard limits on the number of emails that can be sent per day
+  to prevent system overload and maintain delivery quality.
+
+Parameters:
+  - schedules: List of email schedules to cap
+  - config: Load balancing configuration with daily limits
+
+Returns:
+  List of schedules with daily caps enforced
+
+Business Logic:
+  - Groups schedules by date
+  - Identifies days exceeding the daily cap
+  - Moves excess emails to available days or catch-up periods
+  - Maintains email priority when redistributing`,
+                code: `let enforce_daily_caps schedules config =
+  let daily_groups = group_schedules_by_date schedules in
+  let capped_schedules = ref [] in
+  
+  List.iter (fun (date, day_schedules) ->
+    let count = List.length day_schedules in
+    if count <= config.daily_cap then
+      capped_schedules := day_schedules @ !capped_schedules
+    else
+      let (kept, excess) = split_at config.daily_cap day_schedules in
+      let redistributed = redistribute_excess excess config in
+      capped_schedules := kept @ redistributed @ !capped_schedules
+  ) daily_groups;
+  
+  !capped_schedules`
+            }
+        };
+
+        // Initialize Mermaid
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'dark',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            securityLevel: 'loose'
+        });
+
+        // Function to show function details
+        function showFunctionDetails(functionName) {
+            console.log('Showing details for:', functionName);
+            const data = functionData[functionName];
+            if (!data) {
+                console.log('No data found for function:', functionName);
+                return;
+            }
+
+            const detailsContainer = document.getElementById('function-details');
+            detailsContainer.innerHTML = `
+                <div class="function-detail active">
+                    <button class="close-btn" onclick="closeFunctionDetails()">✕ Close</button>
+                    <div class="function-header">
+                        <div class="function-name">${data.name}</div>
+                        <div class="function-file">📁 ${data.file} (Lines ${data.lines})</div>
+                    </div>
+                    <div class="function-code">
+                        <div class="code-section">
+                            <h4>📋 Function Signature</h4>
+                            <pre class="function-signature">${data.signature}</pre>
+                        </div>
+                        <div class="code-section">
+                            <h4>📖 Documentation</h4>
+                            <pre class="doc-comment">${data.documentation}</pre>
+                        </div>
+                        <div class="code-section">
+                            <h4>💻 Source Code</h4>
+                            <pre>${data.code}</pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Function to close function details
+        function closeFunctionDetails() {
+            const detailsContainer = document.getElementById('function-details');
+            detailsContainer.innerHTML = `
+                <div class="welcome-message">
+                    <h3>🔍 Function Explorer</h3>
+                    <p>Click on any function box in the diagrams OR use the function buttons above to see:</p>
+                    <ul style="text-align: left; display: inline-block;">
+                        <li>Complete function signature</li>
+                        <li>Full documentation</li>
+                        <li>Source code with comments</li>
+                        <li>File location and line numbers</li>
+                    </ul>
+                </div>
+            `;
+        }
+
+        // Make functions globally available
+        window.showFunctionDetails = showFunctionDetails;
+        window.closeFunctionDetails = closeFunctionDetails;
+
+        // Add aggressive click handlers after Mermaid renders
+        let setupAttempts = 0;
+        const maxAttempts = 10;
+        
+        function setupClickHandlers() {
+            setupAttempts++;
+            console.log(`Setting up click handlers, attempt ${setupAttempts}`);
+            
+            // Try multiple selectors to catch all possible SVG nodes
+            const selectors = [
+                '.mermaid svg g.node',
+                '.mermaid svg g[class*="node"]',
+                '.mermaid svg rect',
+                '.mermaid svg polygon',
+                '.mermaid svg circle'
+            ];
+            
+            let foundNodes = false;
+            
+            selectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                console.log(`Found ${elements.length} elements for selector: ${selector}`);
+                
+                elements.forEach((element, index) => {
+                    foundNodes = true;
+                    element.style.cursor = 'pointer';
+                    element.style.pointerEvents = 'all';
+                    
+                    // Remove existing listeners to avoid duplicates
+                    element.removeEventListener('click', handleNodeClick);
+                    element.addEventListener('click', handleNodeClick, true);
+                    
+                    // Add visual feedback
+                    element.addEventListener('mouseenter', function() {
+                        this.style.opacity = '0.8';
+                        this.style.filter = 'brightness(1.2)';
+                    });
+                    
+                    element.addEventListener('mouseleave', function() {
+                        this.style.opacity = '1';
+                        this.style.filter = 'brightness(1)';
+                    });
+                    
+                    console.log(`Added handlers to element ${index} of type ${element.tagName}`);
+                });
+            });
+            
+            // If no nodes found and we haven't exceeded max attempts, try again
+            if (!foundNodes && setupAttempts < maxAttempts) {
+                console.log('No nodes found, retrying in 1 second...');
+                setTimeout(setupClickHandlers, 1000);
+            } else if (foundNodes) {
+                console.log('Successfully set up click handlers');
+            } else {
+                console.log('Failed to find nodes after maximum attempts');
+            }
+        }
+        
+        function handleNodeClick(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            console.log('Node clicked!', event.target);
+            
+            // Try to find the text content in various ways
+            let functionName = '';
+            
+            // Method 1: Find text in the clicked element
+            if (event.target.textContent) {
+                functionName = extractFunctionName(event.target.textContent);
+            }
+            
+            // Method 2: Find text in parent or sibling elements
+            if (!functionName) {
+                const parent = event.target.closest('g');
+                if (parent) {
+                    const textElement = parent.querySelector('text');
+                    if (textElement) {
+                        functionName = extractFunctionName(textElement.textContent);
+                    }
+                }
+            }
+            
+            // Method 3: Search for nearby text elements
+            if (!functionName) {
+                const svg = event.target.closest('svg');
+                const allTexts = svg.querySelectorAll('text');
+                const clickX = event.clientX;
+                const clickY = event.clientY;
+                
+                let closestText = null;
+                let closestDistance = Infinity;
+                
+                allTexts.forEach(text => {
+                    const rect = text.getBoundingClientRect();
+                    const distance = Math.sqrt(
+                        Math.pow(clickX - (rect.left + rect.width/2), 2) +
+                        Math.pow(clickY - (rect.top + rect.height/2), 2)
+                    );
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        closestText = text;
+                    }
+                });
+                
+                if (closestText && closestDistance < 100) {
+                    functionName = extractFunctionName(closestText.textContent);
+                }
+            }
+            
+            console.log('Extracted function name:', functionName);
+            
+            if (functionName && functionData[functionName]) {
+                showFunctionDetails(functionName);
+            } else {
+                // Try partial matches
+                const matches = Object.keys(functionData).filter(key => 
+                    key.includes(functionName) || functionName.includes(key)
+                );
+                if (matches.length > 0) {
+                    console.log('Found partial match:', matches[0]);
+                    showFunctionDetails(matches[0]);
+                } else {
+                    console.log('No matching function found for:', functionName);
+                    // Show first function as fallback
+                    showFunctionDetails('schedule_emails_streaming');
+                }
+            }
+        }
+
+        // Function to extract function name from node text
+        function extractFunctionName(text) {
+            if (!text) return '';
+            
+            // Remove HTML tags, emojis, and extra text
+            const cleaned = text
+                .replace(/<[^>]*>/g, '')
+                .replace(/[📧🔧🔄📅📬🎂⏱️🔀🔁⚖️💾📊⚙️👥✓❌🚫⏭️📅🎲]/g, '')
+                .trim();
+            
+            const parts = cleaned.split('\n').map(p => p.trim()).filter(p => p);
+            if (parts.length > 0) {
+                return parts[0];
+            }
+            return cleaned;
+        }
+
+        // Start setup after a delay
+        setTimeout(setupClickHandlers, 2000);
+        
+        // Also try on window load
+        window.addEventListener('load', () => {
+            setTimeout(setupClickHandlers, 1000);
+        });
+        
+        // Test with a simple click on the document
+        document.addEventListener('click', function(event) {
+            console.log('Document clicked:', event.target.tagName, event.target.className);
+        });
+    </script>
+</body>
+</html>

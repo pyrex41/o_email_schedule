@@ -16,31 +16,99 @@
 (executable
  (public_name generate_test_data)
  (name generate_test_data)
- (libraries scheduler))
+ (libraries
+  scheduler
+  caqti
+  caqti-lwt
+  caqti-driver-sqlite3
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson))
 
 (executable
  (public_name performance_tests_parallel)
  (name performance_tests_parallel)
- (libraries scheduler))
+ (libraries
+  scheduler
+  caqti
+  caqti-lwt
+  caqti-driver-sqlite3
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson))
 
 
 (executable
  (public_name pragma_performance_test)
  (name pragma_performance_test)
- (libraries scheduler))
+ (libraries
+  scheduler
+  caqti
+  caqti-lwt
+  caqti-driver-sqlite3
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson))
 
 (executable
  (public_name hybrid_performance_test)
  (name hybrid_performance_test)
- (libraries scheduler unix threads))
+ (libraries
+  scheduler
+  caqti
+  caqti-lwt
+  caqti-driver-sqlite3
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson
+  threads))
 
 (executable
  (public_name native_performance_test)
  (name native_performance_test)
- (libraries scheduler unix))
+ (libraries
+  scheduler
+  caqti
+  caqti-lwt
+  caqti-driver-sqlite3
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson))
 
 (executable
  (public_name scheduler_cli)
  (name scheduler_cli)
- (libraries scheduler))
+ (libraries
+  scheduler
+  scheduler.visualizer
+  caqti
+  caqti-lwt
+  caqti-driver-sqlite3
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson)
+ (preprocess
+  (pps bisect_ppx --conditional)))
+
+(executable
+ (public_name ocaml-visualizer)
+ (name visualizer_cli)
+ (libraries
+  scheduler
+  scheduler.visualizer
+  cmdliner
+  unix
+  yojson))
 

@@ -10,5 +10,5 @@
   lwt
   yojson
   ptime
-  ptime.clock.os)
+  ptime.clock)
 )
