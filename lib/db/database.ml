@@ -12,27 +12,33 @@ let db_path = ref "org-206.sqlite3"
  * Purpose:
  *   Configures the SQLite database file location for all subsequent database
  *   operations, enabling environment-specific database configuration.
+ *   Closes any open connection to avoid connection caching issues.
  * 
  * Parameters:
  *   - path: String path to SQLite database file
  * 
  * Returns:
- *   Unit (side effect: updates global database path reference)
+ *   Unit (side effect: updates global database path reference and closes old connection)
  * 
  * Business Logic:
  *   - Updates global database path configuration
  *   - Enables switching between development, test, and production databases
  *   - Must be called before database operations in different environments
+ *   - Closes any open connection to ensure correct database is used
  * 
  * Usage Example:
  *   Called during application initialization to set environment-specific database
  * 
  * Error Cases:
- *   - None expected (simple reference assignment)
+ *   - None expected (simple reference assignment and connection close)
  * 
  * @integration_point
  *)
-let set_db_path path = db_path := path
+let set_db_path path =
+  if !db_path <> path then (
+    close_database (); (* Close any open connection *)
+    db_path := path
+  )
 
 (* Error handling with Result types *)
 type db_error = 
@@ -74,7 +80,19 @@ let string_of_db_error = function
 (* Get or create database connection *)
 let get_db_connection () =
   match !db_handle with
-  | Some db -> Ok db
+  | Some db ->
+      (* Check if the connection is to the correct path *)
+      let db_filename = Sqlite3.db_filename db "main" in
+      if db_filename = Some !db_path then Ok db
+      else (
+        close_database ();
+        try
+          let db = Sqlite3.db_open !db_path in
+          db_handle := Some db;
+          Ok db
+        with Sqlite3.Error msg ->
+          Error (ConnectionError msg)
+      )
   | None ->
       try
         let db = Sqlite3.db_open !db_path in
@@ -1450,14 +1468,20 @@ let load_organization_config org_id =
 
 (* Get state-specific buffer override if exists *)
 let get_state_buffer_override org_id state =
-  let query = Printf.sprintf {|
-    SELECT pre_exclusion_buffer_days
-    FROM organization_state_buffers
-    WHERE org_id = %d AND state_code = '%s'
-  |} org_id (string_of_state state) in
-  
-  match execute_central_db_query query with
-  | Ok [[buffer_str]] -> 
-      (try Some (int_of_string buffer_str)
-       with _ -> None)
-  | _ -> None
+  let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
+    |> Option.value ~default:"sync-service/data/central_replica.db" in
+  try
+    let central_db = Sqlite3.db_open central_db_path in
+    let stmt = Sqlite3.prepare central_db "SELECT pre_exclusion_buffer_days FROM organization_state_buffers WHERE org_id = ? AND state_code = ?" in
+    ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int org_id)));
+    ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT (string_of_state state)));
+    let result = match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+          let buffer_str = Sqlite3.column stmt 0 in
+          (try Some (int_of_string buffer_str) with _ -> None)
+      | _ -> None
+    in
+    ignore (Sqlite3.finalize stmt);
+    ignore (Sqlite3.db_close central_db);
+    result
+  with Sqlite3.Error _ -> None
