@@ -3,7 +3,6 @@ module HybridConfig.MermaidDiagrams exposing (..)
 import Dict exposing (Dict)
 import HybridConfig.Types exposing (..)
 import HybridConfig.DataFlow exposing (..)
-import String.Extra
 
 
 -- Generate the main hybrid configuration data flow diagram
@@ -185,7 +184,7 @@ generateDecisionTreeNodes state tree parentId =
         childNodes = 
             if isExpanded then
                 tree.children
-                    |> List.map (generateDecisionTreeNodes state tree nodeId)
+                    |> List.map (\child -> generateDecisionTreeNodes state child nodeId)
                     |> String.join "\n"
             else
                 ""

@@ -318,3 +318,32 @@ systemConstantExplanations =
         , ( "postWindowPriority", "Post-window emails: priority 40" )
         , ( "followupPriority", "Follow-up emails: priority 50 (lowest)" )
         ]
+
+
+-- Helper functions for Mermaid diagram generation
+dataFlowNodeId : DataFlowNode -> String
+dataFlowNodeId node =
+    sanitizeNodeId (dataFlowNodeToString node)
+
+
+decisionNodeId : DecisionNode -> String
+decisionNodeId node =
+    sanitizeNodeId (decisionNodeToString node)
+
+
+sanitizeNodeId : String -> String
+sanitizeNodeId str =
+    str
+        |> String.replace " " "_"
+        |> String.replace "(" ""
+        |> String.replace ")" ""
+        |> String.replace "-" "_"
+        |> String.replace "." "_"
+
+
+sanitizeFunctionName : String -> String
+sanitizeFunctionName name =
+    name
+        |> String.replace "_" "__"
+        |> String.replace " " "_"
+        |> String.replace "." "_"

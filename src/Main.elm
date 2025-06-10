@@ -101,17 +101,17 @@ update msg model =
         ChangeView viewType ->
             let
                 newVisualizationState = 
-                    { visualizationState = model.visualizationState | currentView = viewType }
+                    { model.visualizationState | currentView = viewType }
                 
                 newDiagram = 
                     case viewType of
-                        DataFlowView -> generateDataFlowDiagram model.visualizationState
-                        DecisionTreeView -> generateDecisionTreeDiagram model.visualizationState
-                        FunctionCallGraphView -> generateFunctionCallGraph model.functions model.visualizationState
+                        DataFlowView -> generateDataFlowDiagram newVisualizationState
+                        DecisionTreeView -> generateDecisionTreeDiagram newVisualizationState
+                        FunctionCallGraphView -> generateFunctionCallGraph model.functions newVisualizationState
                         ConfigFlowView -> generateConfigFlowDiagram model
             in
             ( { model 
-              | visualizationState = newVisualizationState.visualizationState
+              | visualizationState = newVisualizationState
               , currentDiagram = newDiagram
               }
             , Cmd.none
