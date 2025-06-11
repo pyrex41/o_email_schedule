@@ -9,6 +9,21 @@
  (libraries scheduler))
 
 (executable
+ (public_name comprehensive_scheduler)
+ (name comprehensive_scheduler)
+ (libraries scheduler))
+
+(executable
+ (public_name debug_campaign_scheduler)
+ (name debug_campaign_scheduler)
+ (libraries scheduler))
+
+(executable
+ (public_name campaign_aware_scheduler)
+ (name campaign_aware_scheduler)
+ (libraries scheduler))
+
+(executable
  (public_name performance_tests)
  (name performance_tests)
  (libraries scheduler))

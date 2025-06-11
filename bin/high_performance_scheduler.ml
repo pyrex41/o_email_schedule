@@ -3,14 +3,6 @@ open Scheduler.Db.Database
 
 (* High-performance scheduler implementing Python's query-driven approach *)
 
-(* Simple wrapper to schedule emails for a contact *)
-let schedule_contact_emails contact scheduler_run_id =
-  let config = Scheduler.Config.default in
-  let context = create_context config 1000 in  (* Use default total contacts *)
-  let context_with_run_id = { context with run_id = scheduler_run_id } in
-  match calculate_schedules_for_contact context_with_run_id contact with
-  | Ok schedules -> schedules
-  | Error _err -> []  (* On error, return empty list *)
 
 let run_high_performance_scheduler db_path =
   Printf.printf "=== High-Performance OCaml Email Scheduler ===\n\n";
@@ -68,23 +60,23 @@ let run_high_performance_scheduler db_path =
           
           (* Process contacts and generate schedules *)
           Printf.printf "⚡ Processing contacts with high-performance engine...\n";
-          let all_schedules = ref [] in
-          let scheduled_count = ref 0 in
-          let skipped_count = ref 0 in
           
-          (* Process each contact using the sophisticated business logic *)
-          List.iter (fun contact ->
-            let contact_schedules = schedule_contact_emails contact scheduler_run_id in
-            all_schedules := contact_schedules @ !all_schedules;
-            
-            (* Count schedules vs skips - simplified counting *)
-            let schedule_count = List.length contact_schedules in
-            scheduled_count := !scheduled_count + schedule_count;
-            
-          ) relevant_contacts;
+          (* Use the full scheduling engine that includes campaigns *)
+          let config = Scheduler.Config.default in
+          let total_contacts = List.length relevant_contacts in
+          
+          match Scheduler.Email_scheduler.schedule_emails_streaming ~contacts:relevant_contacts ~config ~total_contacts with
+          | Error err ->
+              Printf.printf "❌ Scheduling failed: %s\n" (Scheduler.Types.string_of_error err);
+              exit 1
+          | Ok result ->
+              let all_schedules = result.schedules in
+              let total_count = List.length all_schedules in
+              let scheduled_count = result.emails_scheduled in
+              let skipped_count = result.emails_skipped in
           
           Printf.printf "   Generated %d total schedules (%d to send, %d skipped)\n" 
-            (List.length !all_schedules) !scheduled_count !skipped_count;
+            total_count scheduled_count skipped_count;
           
           (* Apply load balancing and smoothing *)
           Printf.printf "⚖️  Applying load balancing and smoothing...\n";
@@ -93,7 +85,7 @@ let run_high_performance_scheduler db_path =
             | Error _ -> 1000  (* fallback *)
           in
           let lb_config = Scheduler.Load_balancer.default_config total_contacts_for_lb in
-          (match Scheduler.Load_balancer.distribute_schedules !all_schedules lb_config with
+          (match Scheduler.Load_balancer.distribute_schedules all_schedules lb_config with
            | Ok balanced_schedules ->
                Printf.printf "   Load balancing complete\n";
                

@@ -7,7 +7,15 @@
       "Bash(opam list:*)",
       "Bash(grep:*)",
       "Bash(mv:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(find:*)",
+      "Bash(DATABASE_PATH=org-206-sandbox.db dune exec scheduler 2 >& 1)",
+      "Bash(DATABASE_PATH=org-206-sandbox.db dune exec scheduler 2>&1)",
+      "Bash(DATABASE_PATH=org-206-sandbox.db dune exec high_performance_scheduler org-206-sandbox.db)",
+      "Bash(chmod:*)",
+      "Bash(./test_campaigns.sh:*)",
+      "Bash(./comprehensive_test_scheduler.sh:*)",
+      "Bash(grep -A 15 \"let get_all_contacts\" lib/db/database.ml)"
     ],
     "deny": []
   }

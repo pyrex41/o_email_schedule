@@ -78,7 +78,7 @@ let generate_run_id () =
 let create_context config total_contacts =
   let run_id = generate_run_id () in
   let start_time = current_datetime () in
-  let load_balancing_config = Config.to_load_balancing_config config in
+  let load_balancing_config = Config.to_load_balancing_config config total_contacts in
   { config; run_id; start_time; load_balancing_config }
 
 (** 
