@@ -27,7 +27,7 @@ let get_contacts_with_effective_date_filter (org_config : enhanced_organization_
            COALESCE(c.state, '') as state, 
            COALESCE(c.birth_date, '') as birth_date, 
            COALESCE(c.effective_date, '') as effective_date,
-           COALESCE(c.current_carrier, '') as carrier,
+           COALESCE(c.carrier, c.current_carrier, '') as carrier,
            0 as failed_underwriting
     FROM contacts c
     WHERE c.email IS NOT NULL AND c.email != '' 

@@ -279,32 +279,60 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
   let start_str = Printf.sprintf "%02d-%02d" start_month start_day in
   let end_str = Printf.sprintf "%02d-%02d" end_month end_day in
   
-  (* Updated query to include new fields with fallback for old schema *)
-  let query = 
+  (* Create robust query with fallback logic for different schema versions *)
+  let build_query date_condition =
+    (* First try the full query with contact_events join for failed_underwriting *)
+    let full_query = Printf.sprintf {|
+      SELECT c.id, c.email, 
+             COALESCE(c.zip_code, '') as zip_code, 
+             COALESCE(c.state, '') as state, 
+             COALESCE(c.birth_date, '') as birth_date, 
+             COALESCE(c.effective_date, '') as effective_date,
+             COALESCE(c.carrier, c.current_carrier, '') as carrier,
+             COALESCE(
+               CASE 
+                 WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
+                 THEN 1 
+                 ELSE 0 
+               END, 0
+             ) as failed_underwriting
+      FROM contacts c
+      LEFT JOIN (
+        SELECT contact_id, metadata,
+               ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
+        FROM contact_events 
+        WHERE event_type = 'eligibility_answered'
+      ) ce ON c.id = ce.contact_id AND ce.rn = 1
+      WHERE c.email IS NOT NULL AND c.email != '' %s
+    |} date_condition in
+    
+    (* Fallback query without contact_events dependency *)
+    let fallback_query = Printf.sprintf {|
+      SELECT c.id, c.email, 
+             COALESCE(c.zip_code, '') as zip_code, 
+             COALESCE(c.state, '') as state, 
+             COALESCE(c.birth_date, '') as birth_date, 
+             COALESCE(c.effective_date, '') as effective_date,
+             COALESCE(c.carrier, c.current_carrier, '') as carrier,
+             0 as failed_underwriting
+      FROM contacts c
+      WHERE c.email IS NOT NULL AND c.email != '' %s
+    |} date_condition in
+    
+    (* Try full query first, fallback if it fails *)
+    match execute_sql_safe full_query with
+    | Ok rows -> Ok rows
+    | Error _err -> 
+        (* Log the fallback and try simpler query *)
+        Printf.printf "⚠️  Contact events table unavailable, using fallback query without failed_underwriting\n%!";
+        execute_sql_safe fallback_query
+  in
+  
+  (* Build appropriate date condition based on year boundary crossing *)
+  let date_condition = 
     if start_month <= end_month then
       (* Window doesn't cross year boundary - simple case *)
       Printf.sprintf {|
-        SELECT c.id, c.email, 
-               COALESCE(c.zip_code, '') as zip_code, 
-               COALESCE(c.state, '') as state, 
-               COALESCE(c.birth_date, '') as birth_date, 
-               COALESCE(c.effective_date, '') as effective_date,
-               COALESCE(c.current_carrier, '') as carrier,
-               COALESCE(
-                 CASE 
-                   WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
-                   THEN 1 
-                   ELSE 0 
-                 END, 0
-               ) as failed_underwriting
-        FROM contacts c
-        LEFT JOIN (
-          SELECT contact_id, metadata,
-                 ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
-          FROM contact_events 
-          WHERE event_type = 'eligibility_answered'
-        ) ce ON c.id = ce.contact_id AND ce.rn = 1
-        WHERE c.email IS NOT NULL AND c.email != '' 
         AND (
           (strftime('%%m-%%d', c.birth_date) BETWEEN '%s' AND '%s') OR
           (strftime('%%m-%%d', c.effective_date) BETWEEN '%s' AND '%s')
@@ -313,27 +341,6 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
     else
       (* Window crosses year boundary - need to handle two ranges *)
       Printf.sprintf {|
-        SELECT c.id, c.email, 
-               COALESCE(c.zip_code, '') as zip_code, 
-               COALESCE(c.state, '') as state, 
-               COALESCE(c.birth_date, '') as birth_date, 
-               COALESCE(c.effective_date, '') as effective_date,
-               COALESCE(c.current_carrier, '') as carrier,
-               COALESCE(
-                 CASE 
-                   WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
-                   THEN 1 
-                   ELSE 0 
-                 END, 0
-               ) as failed_underwriting
-        FROM contacts c
-        LEFT JOIN (
-          SELECT contact_id, metadata,
-                 ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
-          FROM contact_events 
-          WHERE event_type = 'eligibility_answered'
-        ) ce ON c.id = ce.contact_id AND ce.rn = 1
-        WHERE c.email IS NOT NULL AND c.email != '' 
         AND (
           (strftime('%%m-%%d', c.birth_date) >= '%s' OR strftime('%%m-%%d', c.birth_date) <= '%s') OR
           (strftime('%%m-%%d', c.effective_date) >= '%s' OR strftime('%%m-%%d', c.effective_date) <= '%s')
@@ -341,7 +348,7 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
       |} start_str end_str start_str end_str
   in
   
-  match execute_sql_safe query with
+  match build_query date_condition with
   | Error err -> Error err
   | Ok rows ->
       let contacts = List.filter_map parse_contact_row rows in
@@ -349,13 +356,14 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
 
 (* Get all contacts with native SQLite - updated for new fields *)
 let get_all_contacts () =
-  let query = {|
+  (* First try the full query with contact_events join for failed_underwriting *)
+  let full_query = {|
     SELECT c.id, c.email, 
            COALESCE(c.zip_code, '') as zip_code, 
            COALESCE(c.state, '') as state, 
            COALESCE(c.birth_date, '') as birth_date, 
            COALESCE(c.effective_date, '') as effective_date,
-           COALESCE(c.carrier, '') as carrier,
+           COALESCE(c.carrier, c.current_carrier, '') as carrier,
            COALESCE(
              CASE 
                WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
@@ -374,11 +382,33 @@ let get_all_contacts () =
     ORDER BY c.id
   |} in
   
-  match execute_sql_safe query with
-  | Error err -> Error err
+  (* Fallback query without contact_events dependency *)
+  let fallback_query = {|
+    SELECT c.id, c.email, 
+           COALESCE(c.zip_code, '') as zip_code, 
+           COALESCE(c.state, '') as state, 
+           COALESCE(c.birth_date, '') as birth_date, 
+           COALESCE(c.effective_date, '') as effective_date,
+           COALESCE(c.carrier, c.current_carrier, '') as carrier,
+           0 as failed_underwriting
+    FROM contacts c
+    WHERE c.email IS NOT NULL AND c.email != '' 
+    ORDER BY c.id
+  |} in
+  
+  (* Try full query first, fallback if it fails *)
+  match execute_sql_safe full_query with
   | Ok rows ->
       let contacts = List.filter_map parse_contact_row rows in
       Ok contacts
+  | Error _err -> 
+      (* Log the fallback and try simpler query *)
+      Printf.printf "⚠️  Contact events table unavailable, using fallback query without failed_underwriting\n%!";
+      (match execute_sql_safe fallback_query with
+       | Error err -> Error err
+       | Ok rows ->
+           let contacts = List.filter_map parse_contact_row rows in
+           Ok contacts)
 
 (* Get total contact count with native SQLite *)
 let get_total_contact_count () =
@@ -1069,15 +1099,22 @@ let get_contact_interactions contact_id since_date =
   match execute_sql_safe clicks_query with
   | Error err -> Error err
   | Ok [[click_count_str]] ->
+      (* Try to get health answers from contact_events, with fallback *)
       (match execute_sql_safe events_query with
-       | Error err -> Error err
        | Ok [[event_count_str]] ->
            (try
              let has_clicks = int_of_string click_count_str > 0 in
              let has_health_answers = int_of_string event_count_str > 0 in
              Ok (has_clicks, has_health_answers)
            with _ -> Error (ParseError "Invalid interaction count"))
-       | Ok _ -> Error (ParseError "Invalid event result"))
+       | Ok _ -> Error (ParseError "Invalid event result")
+       | Error _err -> 
+           (* Fallback: contact_events table unavailable, assume no health answers *)
+           Printf.printf "⚠️  Contact events table unavailable for interaction check, assuming no health answers\n%!";
+           (try
+             let has_clicks = int_of_string click_count_str > 0 in
+             Ok (has_clicks, false)
+           with _ -> Error (ParseError "Invalid click count")))
   | Ok _ -> Error (ParseError "Invalid click result")
 
 (* Create performance indexes *)
