@@ -33,9 +33,6 @@
  (name generate_test_data)
  (libraries
   scheduler
-  caqti
-  caqti-lwt
-  caqti-driver-sqlite3
   sqlite3
   lwt
   ptime
@@ -47,24 +44,17 @@
  (name performance_tests_parallel)
  (libraries
   scheduler
-  caqti
-  caqti-lwt
-  caqti-driver-sqlite3
   sqlite3
   lwt
   ptime
   timedesc
   yojson))
 
-
 (executable
  (public_name pragma_performance_test)
  (name pragma_performance_test)
  (libraries
   scheduler
-  caqti
-  caqti-lwt
-  caqti-driver-sqlite3
   sqlite3
   lwt
   ptime
@@ -76,9 +66,6 @@
  (name hybrid_performance_test)
  (libraries
   scheduler
-  caqti
-  caqti-lwt
-  caqti-driver-sqlite3
   sqlite3
   lwt
   ptime
@@ -91,9 +78,6 @@
  (name native_performance_test)
  (libraries
   scheduler
-  caqti
-  caqti-lwt
-  caqti-driver-sqlite3
   sqlite3
   lwt
   ptime
@@ -106,9 +90,6 @@
  (libraries
   scheduler
   scheduler.visualizer
-  caqti
-  caqti-lwt
-  caqti-driver-sqlite3
   sqlite3
   lwt
   ptime
