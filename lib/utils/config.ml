@@ -1,5 +1,4 @@
 open Types
-open System_constants.SystemConstants
 open Size_profiles
 
 type t = {
@@ -96,9 +95,10 @@ let to_load_balancing_config t =
     daily_send_percentage_cap = t.load_balancing.daily_send_percentage_cap;
     ed_daily_soft_limit = t.load_balancing.ed_daily_soft_limit;
     ed_smoothing_window_days = t.load_balancing.ed_smoothing_window_days;
-    catch_up_spread_days = SystemConstants.catch_up_spread_days;
-    overage_threshold = SystemConstants.overage_threshold;
+    catch_up_spread_days = System_constants.SystemConstants.catch_up_spread_days;
+    overage_threshold = System_constants.SystemConstants.overage_threshold;
     total_contacts = t.load_balancing.total_contacts;
+    batch_size = t.load_balancing.batch_size;
   }
 
 (* Legacy compatibility function for existing code *)

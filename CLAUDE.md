@@ -39,6 +39,10 @@ dune exec test/test_edge_cases.exe             # Edge case tests
 dune exec high_performance_scheduler
 dune exec performance_tests_parallel
 ./run_performance_tests.sh
+./run_performance_tests.sh --full      # Comprehensive performance suite
+
+# Run sync service (for central database access)
+cd sync-service && ./start.sh
 
 # Build with test coverage
 dune test --instrument-with bisect_ppx
@@ -123,7 +127,16 @@ SQLite database (`org-206.sqlite3`) containing:
 - `campaign_types` - Campaign definitions
 - `campaign_instances` - Active campaign instances
 - `contact_campaigns` - Contact-campaign associations
+- `organizations` - Organization configuration with hybrid config columns
+- `organization_state_buffers` - State-specific buffer overrides
 - Change tracking and audit tables
+
+### Sync Service
+The project includes a Go-based sync service (`sync-service/`) that:
+- Maintains a local SQLite replica of the central Turso database
+- Auto-syncs every 2 minutes
+- Provides local database access at `./sync-service/data/central_replica.db`
+- Runs on port 9191 by default
 
 ## Important Business Rules
 
@@ -178,3 +191,38 @@ Recent changes:
 - Fixed critical SQL bug in test data generation
 - Added comprehensive test coverage
 - Implemented OCaml Program Flow Visualizer
+
+## Common Development Tasks
+
+### Running a Single Test
+```bash
+# Run a specific test function within a test file
+dune exec test/test_scheduler.exe -- --filter "test_birthday_email_scheduling"
+
+# Run tests with verbose output
+ALCOTEST_VERBOSE=1 dune test
+
+# Run only quick tests during development
+dune exec test/test_scheduler_simple.exe
+```
+
+### Working with the Visualizer
+```bash
+# Generate visualization for a specific module
+dune exec ocaml-visualizer -- --module Email_scheduler lib/scheduling/
+
+# Update visualization after code changes
+dune exec ocaml-visualizer -- --output web lib/ && cd web && python3 -m http.server 8000
+```
+
+### Database Operations
+```bash
+# Run migrations
+sqlite3 org-206.sqlite3 < migrations/001_add_organization_config.sql
+
+# Connect to database for debugging
+sqlite3 org-206.sqlite3
+
+# Check sync service database
+sqlite3 sync-service/data/central_replica.db
+```

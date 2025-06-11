@@ -291,6 +291,7 @@ type load_balancing_config = {
   catch_up_spread_days: int;
   overage_threshold: float;
   total_contacts: int;
+  batch_size: int;
 }
 
 type distribution_analysis = {

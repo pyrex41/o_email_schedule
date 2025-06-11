@@ -39,7 +39,7 @@ type exclusion_result =
  * 
  * @business_rule @state_machine
  *)
-let check_birthday_exclusion org_config contact check_date =
+let check_birthday_exclusion (org_config : enhanced_organization_config) contact check_date =
   match contact.state, contact.birthday with
   | Some state, Some birthday ->
       begin match get_window_for_email_type state (Anniversary Birthday) with
@@ -94,7 +94,7 @@ let check_birthday_exclusion org_config contact check_date =
  * 
  * @business_rule @state_machine
  *)
-let check_effective_date_exclusion org_config contact check_date =
+let check_effective_date_exclusion (org_config : enhanced_organization_config) contact check_date =
   match contact.state, contact.effective_date with
   | Some state, Some ed ->
       begin match get_window_for_email_type state (Anniversary EffectiveDate) with

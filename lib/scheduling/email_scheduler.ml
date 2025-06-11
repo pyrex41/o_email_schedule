@@ -75,7 +75,7 @@ let generate_run_id () =
  * 
  * @integration_point @state_machine
  *)
-let create_context config total_contacts =
+let create_context config _total_contacts =
   let run_id = generate_run_id () in
   let start_time = current_datetime () in
   let load_balancing_config = Config.to_load_balancing_config config in

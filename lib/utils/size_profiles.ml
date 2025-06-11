@@ -1,5 +1,4 @@
 open Types
-open System_constants.SystemConstants
 
 (** Compute load balancing configuration based on organization size *)
 let load_balancing_for_profile profile total_contacts =
@@ -40,11 +39,11 @@ let load_balancing_for_profile profile total_contacts =
   base_config
 
 (** Apply JSON overrides to computed configuration *)
-let apply_config_overrides base_config overrides =
+let apply_config_overrides (base_config : computed_load_balancing_config) overrides =
   match overrides with
   | None -> base_config
   | Some override_list ->
-      List.fold_left (fun config (key, value) ->
+      List.fold_left (fun (config : computed_load_balancing_config) (key, value) ->
         match key with
         | "daily_send_percentage_cap" ->
             (match value with

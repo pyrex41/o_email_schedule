@@ -6,6 +6,14 @@ open Date_time
 let db_handle = ref None
 let db_path = ref "org-206.sqlite3"
 
+(* Close database connection - defined early as it's used by set_db_path *)
+let rec close_database () =
+  match !db_handle with
+  | None -> ()
+  | Some db ->
+      ignore (Sqlite3.db_close db);
+      db_handle := None
+
 (** 
  * [set_db_path]: Sets the database file path for SQLite connections
  * 
@@ -34,7 +42,7 @@ let db_path = ref "org-206.sqlite3"
  * 
  * @integration_point
  *)
-let set_db_path path =
+and set_db_path path =
   if !db_path <> path then (
     close_database (); (* Close any open connection *)
     db_path := path
@@ -80,19 +88,15 @@ let string_of_db_error = function
 (* Get or create database connection *)
 let get_db_connection () =
   match !db_handle with
-  | Some db ->
-      (* Check if the connection is to the correct path *)
-      let db_filename = Sqlite3.db_filename db "main" in
-      if db_filename = Some !db_path then Ok db
-      else (
-        close_database ();
-        try
-          let db = Sqlite3.db_open !db_path in
-          db_handle := Some db;
-          Ok db
-        with Sqlite3.Error msg ->
-          Error (ConnectionError msg)
-      )
+  | Some _db ->
+      (* Always close and reopen to ensure correct database *)
+      close_database ();
+      (try
+        let db = Sqlite3.db_open !db_path in
+        db_handle := Some db;
+        Ok db
+      with Sqlite3.Error msg ->
+        Error (ConnectionError msg))
   | None ->
       try
         let db = Sqlite3.db_open !db_path in
@@ -285,8 +289,8 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
                COALESCE(state, '') as state, 
                COALESCE(birth_date, '') as birth_date, 
                COALESCE(effective_date, '') as effective_date,
-               COALESCE(carrier, '') as carrier,
-               COALESCE(failed_underwriting, 0) as failed_underwriting
+               COALESCE(current_carrier, '') as carrier,
+               0 as failed_underwriting
         FROM contacts
         WHERE email IS NOT NULL AND email != '' 
         AND (
@@ -302,8 +306,8 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
                COALESCE(state, '') as state, 
                COALESCE(birth_date, '') as birth_date, 
                COALESCE(effective_date, '') as effective_date,
-               COALESCE(carrier, '') as carrier,
-               COALESCE(failed_underwriting, 0) as failed_underwriting
+               COALESCE(current_carrier, '') as carrier,
+               0 as failed_underwriting
         FROM contacts
         WHERE email IS NOT NULL AND email != '' 
         AND (
@@ -1109,13 +1113,7 @@ let initialize_database () =
        | Error err -> Error err)
   | Error err -> Error err
 
-(* Close database connection *)
-let close_database () =
-  match !db_handle with
-  | None -> ()
-  | Some db ->
-      ignore (Sqlite3.db_close db);
-      db_handle := None 
+ 
 
 (* Campaign database functions *)
 
@@ -1466,6 +1464,9 @@ let load_organization_config org_id =
   | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
   | Ok _ -> Error (ParseError "Multiple organizations found")
 
+(* Alias for interface compatibility *)
+let get_enhanced_organization_config = load_organization_config
+
 (* Get state-specific buffer override if exists *)
 let get_state_buffer_override org_id state =
   let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
@@ -1477,8 +1478,11 @@ let get_state_buffer_override org_id state =
     ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT (string_of_state state)));
     let result = match Sqlite3.step stmt with
       | Sqlite3.Rc.ROW ->
-          let buffer_str = Sqlite3.column stmt 0 in
-          (try Some (int_of_string buffer_str) with _ -> None)
+          let buffer_data = Sqlite3.column stmt 0 in
+          (match buffer_data with
+           | Sqlite3.Data.INT i -> Some (Int64.to_int i)
+           | Sqlite3.Data.TEXT s -> (try Some (int_of_string s) with _ -> None)
+           | _ -> None)
       | _ -> None
     in
     ignore (Sqlite3.finalize stmt);
