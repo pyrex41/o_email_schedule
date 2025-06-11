@@ -284,35 +284,59 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
     if start_month <= end_month then
       (* Window doesn't cross year boundary - simple case *)
       Printf.sprintf {|
-        SELECT id, email, 
-               COALESCE(zip_code, '') as zip_code, 
-               COALESCE(state, '') as state, 
-               COALESCE(birth_date, '') as birth_date, 
-               COALESCE(effective_date, '') as effective_date,
-               COALESCE(current_carrier, '') as carrier,
-               0 as failed_underwriting
-        FROM contacts
-        WHERE email IS NOT NULL AND email != '' 
+        SELECT c.id, c.email, 
+               COALESCE(c.zip_code, '') as zip_code, 
+               COALESCE(c.state, '') as state, 
+               COALESCE(c.birth_date, '') as birth_date, 
+               COALESCE(c.effective_date, '') as effective_date,
+               COALESCE(c.current_carrier, '') as carrier,
+               COALESCE(
+                 CASE 
+                   WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
+                   THEN 1 
+                   ELSE 0 
+                 END, 0
+               ) as failed_underwriting
+        FROM contacts c
+        LEFT JOIN (
+          SELECT contact_id, metadata,
+                 ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
+          FROM contact_events 
+          WHERE event_type = 'eligibility_answered'
+        ) ce ON c.id = ce.contact_id AND ce.rn = 1
+        WHERE c.email IS NOT NULL AND c.email != '' 
         AND (
-          (strftime('%%m-%%d', birth_date) BETWEEN '%s' AND '%s') OR
-          (strftime('%%m-%%d', effective_date) BETWEEN '%s' AND '%s')
+          (strftime('%%m-%%d', c.birth_date) BETWEEN '%s' AND '%s') OR
+          (strftime('%%m-%%d', c.effective_date) BETWEEN '%s' AND '%s')
         )
       |} start_str end_str start_str end_str
     else
       (* Window crosses year boundary - need to handle two ranges *)
       Printf.sprintf {|
-        SELECT id, email, 
-               COALESCE(zip_code, '') as zip_code, 
-               COALESCE(state, '') as state, 
-               COALESCE(birth_date, '') as birth_date, 
-               COALESCE(effective_date, '') as effective_date,
-               COALESCE(current_carrier, '') as carrier,
-               0 as failed_underwriting
-        FROM contacts
-        WHERE email IS NOT NULL AND email != '' 
+        SELECT c.id, c.email, 
+               COALESCE(c.zip_code, '') as zip_code, 
+               COALESCE(c.state, '') as state, 
+               COALESCE(c.birth_date, '') as birth_date, 
+               COALESCE(c.effective_date, '') as effective_date,
+               COALESCE(c.current_carrier, '') as carrier,
+               COALESCE(
+                 CASE 
+                   WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
+                   THEN 1 
+                   ELSE 0 
+                 END, 0
+               ) as failed_underwriting
+        FROM contacts c
+        LEFT JOIN (
+          SELECT contact_id, metadata,
+                 ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
+          FROM contact_events 
+          WHERE event_type = 'eligibility_answered'
+        ) ce ON c.id = ce.contact_id AND ce.rn = 1
+        WHERE c.email IS NOT NULL AND c.email != '' 
         AND (
-          (strftime('%%m-%%d', birth_date) >= '%s' OR strftime('%%m-%%d', birth_date) <= '%s') OR
-          (strftime('%%m-%%d', effective_date) >= '%s' OR strftime('%%m-%%d', effective_date) <= '%s')
+          (strftime('%%m-%%d', c.birth_date) >= '%s' OR strftime('%%m-%%d', c.birth_date) <= '%s') OR
+          (strftime('%%m-%%d', c.effective_date) >= '%s' OR strftime('%%m-%%d', c.effective_date) <= '%s')
         )
       |} start_str end_str start_str end_str
   in
@@ -326,16 +350,28 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
 (* Get all contacts with native SQLite - updated for new fields *)
 let get_all_contacts () =
   let query = {|
-    SELECT id, email, 
-           COALESCE(zip_code, '') as zip_code, 
-           COALESCE(state, '') as state, 
-           COALESCE(birth_date, '') as birth_date, 
-           COALESCE(effective_date, '') as effective_date,
-           COALESCE(carrier, '') as carrier,
-           COALESCE(failed_underwriting, 0) as failed_underwriting
-    FROM contacts
-    WHERE email IS NOT NULL AND email != '' 
-    ORDER BY id
+    SELECT c.id, c.email, 
+           COALESCE(c.zip_code, '') as zip_code, 
+           COALESCE(c.state, '') as state, 
+           COALESCE(c.birth_date, '') as birth_date, 
+           COALESCE(c.effective_date, '') as effective_date,
+           COALESCE(c.carrier, '') as carrier,
+           COALESCE(
+             CASE 
+               WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
+               THEN 1 
+               ELSE 0 
+             END, 0
+           ) as failed_underwriting
+    FROM contacts c
+    LEFT JOIN (
+      SELECT contact_id, metadata,
+             ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
+      FROM contact_events 
+      WHERE event_type = 'eligibility_answered'
+    ) ce ON c.id = ce.contact_id AND ce.rn = 1
+    WHERE c.email IS NOT NULL AND c.email != '' 
+    ORDER BY c.id
   |} in
   
   match execute_sql_safe query with
