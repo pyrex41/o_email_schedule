@@ -127,3 +127,8 @@
   unix
   yojson))
 
+(executable
+ (public_name debug_constraint)
+ (name debug_constraint)
+ (libraries scheduler))
+

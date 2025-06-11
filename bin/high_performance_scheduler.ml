@@ -65,7 +65,7 @@ let run_high_performance_scheduler db_path =
           let config = Scheduler.Config.default in
           let total_contacts = List.length relevant_contacts in
           
-          match Scheduler.Email_scheduler.schedule_emails_streaming ~contacts:relevant_contacts ~config ~total_contacts with
+          match Scheduler.Email_scheduler.schedule_emails_streaming ~contacts:relevant_contacts ~config ~_total_contacts:total_contacts with
           | Error err ->
               Printf.printf "❌ Scheduling failed: %s\n" (Scheduler.Types.string_of_error err);
               exit 1

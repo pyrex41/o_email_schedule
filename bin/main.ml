@@ -40,7 +40,7 @@ let demo_comprehensive_scheduling () =
   let config = Scheduler.Config.default in
   let total_contacts = List.length contacts in
   
-  match schedule_emails_streaming ~contacts ~config ~total_contacts with
+  match schedule_emails_streaming ~contacts ~config ~_total_contacts with
   | Ok result ->
       Printf.printf "✅ Scheduling completed successfully!\n\n";
       

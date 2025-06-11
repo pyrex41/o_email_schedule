@@ -46,7 +46,7 @@ let run_comprehensive_scheduler db_path =
           (* Use the comprehensive scheduling function that handles BOTH anniversaries AND campaigns *)
           Printf.printf "⚡ Running comprehensive scheduler (anniversaries + campaigns)...\n";
           
-          match schedule_emails_streaming ~contacts ~config ~total_contacts:contact_count with
+          match schedule_emails_streaming ~contacts ~config ~_total_contacts:contact_count with
           | Ok result ->
               Printf.printf "✅ Comprehensive scheduling completed successfully!\n\n";
               

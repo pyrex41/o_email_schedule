@@ -288,7 +288,7 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
              COALESCE(c.state, '') as state, 
              COALESCE(c.birth_date, '') as birth_date, 
              COALESCE(c.effective_date, '') as effective_date,
-             COALESCE(c.carrier, c.current_carrier, '') as carrier,
+             COALESCE(c.current_carrier, '') as carrier,
              COALESCE(
                CASE 
                  WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
@@ -313,7 +313,7 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
              COALESCE(c.state, '') as state, 
              COALESCE(c.birth_date, '') as birth_date, 
              COALESCE(c.effective_date, '') as effective_date,
-             COALESCE(c.carrier, c.current_carrier, '') as carrier,
+             COALESCE(c.current_carrier, '') as carrier,
              0 as failed_underwriting
       FROM contacts c
       WHERE c.email IS NOT NULL AND c.email != '' %s
@@ -363,7 +363,7 @@ let get_all_contacts () =
            COALESCE(c.state, '') as state, 
            COALESCE(c.birth_date, '') as birth_date, 
            COALESCE(c.effective_date, '') as effective_date,
-           COALESCE(c.carrier, c.current_carrier, '') as carrier,
+           COALESCE(c.current_carrier, '') as carrier,
            COALESCE(
              CASE 
                WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
@@ -389,7 +389,7 @@ let get_all_contacts () =
            COALESCE(c.state, '') as state, 
            COALESCE(c.birth_date, '') as birth_date, 
            COALESCE(c.effective_date, '') as effective_date,
-           COALESCE(c.carrier, c.current_carrier, '') as carrier,
+           COALESCE(c.current_carrier, '') as carrier,
            0 as failed_underwriting
     FROM contacts c
     WHERE c.email IS NOT NULL AND c.email != '' 

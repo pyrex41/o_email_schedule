@@ -117,7 +117,7 @@ let test_golden_master () =
         | Error err -> failwith ("Failed to get contact count: " ^ Db.Database_native.string_of_db_error err)
         | Ok total_count ->
             (* Run the scheduler *)
-            match Email_scheduler.schedule_emails_streaming ~contacts ~config ~total_contacts:total_count with
+            match Email_scheduler.schedule_emails_streaming ~contacts ~config ~_total_contacts:total_count with
             | Error err -> failwith ("Scheduler failed: " ^ string_of_error err)
             | Ok batch_result ->
                 (* Insert schedules into database *)
