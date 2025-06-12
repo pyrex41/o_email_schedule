@@ -112,18 +112,19 @@ check_lock_expiry() {
         local second=${lock_timestamp:17:2}
         
         # Convert to seconds since epoch using a more reliable approach
-        local lock_epoch
-        if command -v date >/dev/null 2>&1 && date -u -d "test" >/dev/null 2>&1; then
-            # GNU date is available
-            lock_epoch=$(date -u -d "$lock_timestamp" +%s 2>/dev/null)
-        else
-            # BusyBox date or fallback
+        local lock_epoch=""
+
+        # 1) Try GNU coreutils date parsing (supports "-d <iso8601>")
+        lock_epoch=$(date -u -d "$lock_timestamp" +%s 2>/dev/null || true)
+
+        # 2) If that failed, fall back to BusyBox date which requires an explicit format via -D
+        if [ -z "$lock_epoch" ]; then
             local temp_date="${year}-${month}-${day} ${hour}:${minute}:${second}"
-            lock_epoch=$(date -u -D "%Y-%m-%d %H:%M:%S" -d "$temp_date" +%s 2>/dev/null)
+            lock_epoch=$(date -u -D "%Y-%m-%d %H:%M:%S" -d "$temp_date" +%s 2>/dev/null || true)
         fi
-        
-        # If date parsing failed, consider the lock active
-        if [ $? -ne 0 ] || [ -z "$lock_epoch" ]; then
+
+        # If date parsing still failed, consider the lock active
+        if [ -z "$lock_epoch" ]; then
             echo "⚠️ Failed to parse lock timestamp"
             return 1  # Keep the lock, consider it active
         fi
