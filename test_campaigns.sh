@@ -59,8 +59,14 @@ run_campaign_test() {
     echo -e "\n${BLUE}📊 Running scheduler for: $test_name${NC}"
     show_campaign_info "$db_file"
     
-    # Run the scheduler
-    DATABASE_PATH="$db_file" dune exec high_performance_scheduler "$db_file" 2>/dev/null || true
+    # Run the scheduler - FIXED: Pass database path as command line argument
+    timeout 30s dune exec high_performance_scheduler "$db_file" 2>&1 | while IFS= read -r line; do
+        case "$line" in
+            *"❌"*|*"Error"*|*"Failed"*) echo "  ${RED}$line${NC}" ;;
+            *"✅"*|*"complete"*) echo "  ${GREEN}$line${NC}" ;;
+            *) echo "  $line" ;;
+        esac
+    done
     
     # Show results
     echo -e "\n${GREEN}📋 Generated Email Schedules:${NC}"
