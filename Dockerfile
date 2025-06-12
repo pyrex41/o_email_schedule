@@ -1,14 +1,15 @@
 # Use OCaml Alpine base image
-FROM ocaml/opam:alpine-5.1 as builder
+FROM ocaml/opam:debian-12-ocaml-5.1 as builder
 
 # Install system dependencies
-RUN sudo apk add --no-cache \
-    sqlite-dev \
-    gmp-dev \
-    openssl-dev \
+RUN sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+    libsqlite3-dev \
+    libgmp-dev \
+    libssl-dev \
     pkg-config \
     m4 \
-    git
+    git \
+    && sudo rm -rf /var/lib/apt/lists/*
 
 # Set up opam environment
 USER opam
@@ -31,7 +32,8 @@ RUN eval $(opam env) && dune build --release
 FROM debian:bookworm-slim as runtime
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgmp10 \
     sqlite3 \
     libsqlite3-0 \
     ca-certificates \
@@ -40,6 +42,7 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     fuse \
     wget \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
 # Install TigrisFS (optimized FUSE driver for Tigris)
