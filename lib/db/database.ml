@@ -88,15 +88,9 @@ let string_of_db_error = function
 (* Get or create database connection *)
 let get_db_connection () =
   match !db_handle with
-  | Some _db ->
-      (* Always close and reopen to ensure correct database *)
-      close_database ();
-      (try
-        let db = Sqlite3.db_open !db_path in
-        db_handle := Some db;
-        Ok db
-      with Sqlite3.Error msg ->
-        Error (ConnectionError msg))
+  | Some db ->
+      (* Reuse existing connection. It will be refreshed by [set_db_path] when the database path actually changes. *)
+      Ok db
   | None ->
       try
         let db = Sqlite3.db_open !db_path in
