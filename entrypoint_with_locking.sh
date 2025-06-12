@@ -35,7 +35,11 @@ echo "Bucket: $BUCKET_NAME"
 
 # Generate unique instance ID
 INSTANCE_ID="instance_$(date +%Y%m%d_%H%M%S)_$$_$(hostname)"
-LOCK_KEY="org-data/99.db.lock"
+# Tenant / organization ID (defaults to 99 if not provided)
+ORG_ID="${ORG_ID:-99}"
+
+# Use tenant-specific paths for lock files to avoid cross-tenant contention
+LOCK_KEY="org-data/${ORG_ID}.db.lock"
 LOCK_TIMEOUT=3600  # 1 hour timeout
 # Track whether this instance successfully acquired the lock
 LOCK_ACQUIRED=0
@@ -233,19 +237,25 @@ fi
 
 echo "✅ Tigris bucket mounted successfully"
 
-# Define paths
-REMOTE_DB_PATH="/tigris/org-data/99.db"
+# Define paths (tenant-specific)
+REMOTE_DB_PATH="/tigris/org-data/${ORG_ID}.db"
 LOCAL_DB_PATH="/app/data/working_copy.db"
-ORG_ID="${ORG_ID:-99}"
 
 # Create local data directory if it doesn't exist
 mkdir -p /app/data
 
+# Ensure the local database file exists so that sqlite3_rsync has a valid destination
+if [ ! -f "$LOCAL_DB_PATH" ]; then
+    sqlite3 "$LOCAL_DB_PATH" "PRAGMA user_version;" >/dev/null 2>&1
+fi
+
 # Check if remote database exists
 if [ ! -f "$REMOTE_DB_PATH" ]; then
     echo "⚠️  Remote database not found at $REMOTE_DB_PATH"
-    echo "This might be the first run - creating empty local database"
-    touch "$LOCAL_DB_PATH"
+    echo "This might be the first run - initializing new local database"
+
+    # Create an empty, but valid, SQLite database
+    sqlite3 "$LOCAL_DB_PATH" "PRAGMA user_version;" >/dev/null 2>&1
 else
     echo "📥 Syncing database from Tigris to local working copy..."
     
@@ -287,11 +297,22 @@ echo "📤 Syncing modified database back to Tigris..."
 # Ensure remote directory exists
 mkdir -p "$(dirname "$REMOTE_DB_PATH")"
 
-if sqlite3_rsync "$LOCAL_DB_PATH" "$REMOTE_DB_PATH"; then
-    echo "✅ Database synced back to Tigris successfully"
+if [ -f "$REMOTE_DB_PATH" ]; then
+    # Remote DB exists – perform incremental sync
+    if sqlite3_rsync "$LOCAL_DB_PATH" "$REMOTE_DB_PATH"; then
+        echo "✅ Database synced back to Tigris successfully (rsync)"
+    else
+        echo "❌ ERROR: Failed to rsync database back to Tigris"
+        exit 1
+    fi
 else
-    echo "❌ ERROR: Failed to sync database back to Tigris"
-    exit 1
+    # Remote DB does not exist yet – first-time upload
+    if cp "$LOCAL_DB_PATH" "$REMOTE_DB_PATH"; then
+        echo "✅ Initial database uploaded to Tigris successfully"
+    else
+        echo "❌ ERROR: Failed to upload initial database to Tigris"
+        exit 1
+    fi
 fi
 
 echo "🎉 Email Scheduler completed successfully!"
