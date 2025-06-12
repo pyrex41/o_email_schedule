@@ -29,6 +29,8 @@ export AWS_REGION="${AWS_REGION:-auto}"
 LOCK_KEY="test-lock/scheduler.lock"
 LOCK_TIMEOUT=60  # 1 minute for testing
 INSTANCE_ID="test_instance_$$_$(date +%s)"
+# Track if this instance acquired the lock
+LOCK_ACQUIRED=0
 
 echo "Configuration:"
 echo "  Bucket: $BUCKET_NAME"
@@ -49,6 +51,7 @@ acquire_lock() {
         --if-none-match "*" \
         --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1; then
         echo "✅ Lock acquired successfully!"
+        LOCK_ACQUIRED=1  # remember ownership
         return 0
     else
         echo "❌ Lock acquisition failed (another instance has the lock)"
@@ -77,6 +80,29 @@ check_lock_status() {
 
 # Function to release lock
 release_lock() {
+    # Only attempt to delete the lock if we acquired it
+    if [ "$LOCK_ACQUIRED" -ne 1 ]; then
+        echo "🔓 No lock held by this instance – skipping release"
+        return
+    fi
+
+    # Verify the lock is still ours (check instance_id in file)
+    if aws s3api get-object \
+        --bucket "$BUCKET_NAME" \
+        --key "$LOCK_KEY" \
+        --endpoint-url "$AWS_ENDPOINT_URL_S3" \
+        /tmp/release_lock_info.json 2>/dev/null; then
+        current_instance_id=$(grep -o '"instance_id":"[^"]*"' /tmp/release_lock_info.json | cut -d':' -f2 | tr -d '"')
+        rm -f /tmp/release_lock_info.json
+        if [ "$current_instance_id" != "$INSTANCE_ID" ]; then
+            echo "⚠️  Lock is now held by another instance ($current_instance_id) – not deleting"
+            return
+        fi
+    else
+        echo "ℹ️  Lock file already absent; nothing to release"
+        return
+    fi
+
     echo "🔓 Releasing lock..."
     if aws s3 rm "s3://$BUCKET_NAME/$LOCK_KEY" \
         --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1; then

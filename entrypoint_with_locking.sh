@@ -37,6 +37,8 @@ echo "Bucket: $BUCKET_NAME"
 INSTANCE_ID="instance_$(date +%Y%m%d_%H%M%S)_$$_$(hostname)"
 LOCK_KEY="org-data/99.db.lock"
 LOCK_TIMEOUT=3600  # 1 hour timeout
+# Track whether this instance successfully acquired the lock
+LOCK_ACQUIRED=0
 
 echo "🔒 Attempting to acquire processing lock..."
 echo "Instance ID: $INSTANCE_ID"
@@ -64,6 +66,7 @@ acquire_lock() {
         --if-none-match "*" \
         --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1; then
         echo "✅ Lock acquired successfully"
+        LOCK_ACQUIRED=1  # remember that we hold the lock
         rm -f "$temp_file"
         return 0
     else
@@ -74,6 +77,30 @@ acquire_lock() {
 
 # Function to release lock
 release_lock() {
+    # Only attempt to delete the lock object if *this* instance still owns it
+    if [ "$LOCK_ACQUIRED" -ne 1 ]; then
+        echo "🔓 No lock held by this instance – skipping release"
+        return
+    fi
+
+    # Verify that the lock file is still owned by this instance (avoid race)
+    if aws s3api get-object \
+        --bucket "$BUCKET_NAME" \
+        --key "$LOCK_KEY" \
+        --endpoint-url "$AWS_ENDPOINT_URL_S3" \
+        /tmp/current_lock_release.json 2>/dev/null; then
+        current_instance_id=$(jq -r '.instance_id' /tmp/current_lock_release.json 2>/dev/null || echo "")
+        rm -f /tmp/current_lock_release.json
+        if [ "$current_instance_id" != "$INSTANCE_ID" ]; then
+            echo "⚠️  Lock is now owned by another instance ($current_instance_id) – not deleting"
+            return
+        fi
+    else
+        # Lock file already gone – nothing to clean up
+        echo "ℹ️  Lock file already absent; nothing to release"
+        return
+    fi
+
     echo "🔓 Releasing processing lock..."
     aws s3 rm "s3://$BUCKET_NAME/$LOCK_KEY" \
         --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1 || true
