@@ -41,20 +41,33 @@ LOCK_TIMEOUT=3600  # 1 hour timeout
 echo "🔒 Attempting to acquire processing lock..."
 echo "Instance ID: $INSTANCE_ID"
 
+# Function to properly escape JSON strings
+json_escape() {
+    printf '%s' "$1" | jq -Rs .
+}
+
 # Function to acquire lock using conditional PUT
 acquire_lock() {
-    local lock_content="{\"instance_id\":\"$INSTANCE_ID\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"timeout\":$LOCK_TIMEOUT}"
+    # Create a temporary file for the lock content
+    local temp_file=$(mktemp)
+    local escaped_instance_id=$(json_escape "$INSTANCE_ID")
+    local lock_content="{\"instance_id\":$escaped_instance_id,\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"timeout\":$LOCK_TIMEOUT}"
+    
+    # Write lock content to temporary file
+    echo "$lock_content" > "$temp_file"
     
     # Try to create lock file with conditional write (if-none-match)
     if aws s3api put-object \
         --bucket "$BUCKET_NAME" \
         --key "$LOCK_KEY" \
-        --body <(echo "$lock_content") \
+        --body "$temp_file" \
         --if-none-match "*" \
         --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1; then
         echo "✅ Lock acquired successfully"
+        rm -f "$temp_file"
         return 0
     else
+        rm -f "$temp_file"
         return 1
     fi
 }
@@ -75,21 +88,63 @@ check_lock_expiry() {
         --endpoint-url "$AWS_ENDPOINT_URL_S3" \
         /tmp/lock_info.json 2>/dev/null); then
         
-        local lock_timestamp=$(jq -r '.timestamp' /tmp/lock_info.json 2>/dev/null || echo "")
-        if [ -n "$lock_timestamp" ]; then
-            local lock_epoch=$(date -d "$lock_timestamp" +%s 2>/dev/null || echo "0")
-            local now_epoch=$(date +%s)
-            local age=$((now_epoch - lock_epoch))
-            
-            if [ $age -gt $LOCK_TIMEOUT ]; then
-                echo "⏰ Existing lock expired (age: ${age}s), removing..."
-                aws s3 rm "s3://$BUCKET_NAME/$LOCK_KEY" \
-                    --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1 || true
-                return 0
-            else
-                echo "🔒 Active lock found (age: ${age}s), waiting..."
-                return 1
-            fi
+        local lock_timestamp=$(jq -r '.timestamp' /tmp/lock_info.json 2>/dev/null)
+        
+        # Check if timestamp parsing failed or is empty
+        if [ -z "$lock_timestamp" ] || [ "$lock_timestamp" = "null" ]; then
+            echo "⚠️ Invalid lock file format (no timestamp found)"
+            return 1  # Don't remove the lock, consider it active
+        fi
+        
+        # Parse ISO8601 timestamp using compatible method for Alpine/BusyBox
+        # Format expected: 2023-04-15T12:34:56Z
+        if [[ ! "$lock_timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+            echo "⚠️ Invalid timestamp format in lock file: $lock_timestamp"
+            return 1  # Keep the lock, consider it active
+        fi
+        
+        # Extract date parts
+        local year=${lock_timestamp:0:4}
+        local month=${lock_timestamp:5:2}
+        local day=${lock_timestamp:8:2}
+        local hour=${lock_timestamp:11:2}
+        local minute=${lock_timestamp:14:2}
+        local second=${lock_timestamp:17:2}
+        
+        # Convert to seconds since epoch using a more reliable approach
+        local lock_epoch
+        if command -v date >/dev/null 2>&1 && date -u -d "test" >/dev/null 2>&1; then
+            # GNU date is available
+            lock_epoch=$(date -u -d "$lock_timestamp" +%s 2>/dev/null)
+        else
+            # BusyBox date or fallback
+            local temp_date="${year}-${month}-${day} ${hour}:${minute}:${second}"
+            lock_epoch=$(date -u -D "%Y-%m-%d %H:%M:%S" -d "$temp_date" +%s 2>/dev/null)
+        fi
+        
+        # If date parsing failed, consider the lock active
+        if [ $? -ne 0 ] || [ -z "$lock_epoch" ]; then
+            echo "⚠️ Failed to parse lock timestamp"
+            return 1  # Keep the lock, consider it active
+        fi
+        
+        local now_epoch=$(date +%s)
+        local age=$((now_epoch - lock_epoch))
+        
+        # Ensure we got a reasonable value
+        if [ $age -lt 0 ] || [ $age -gt 31536000 ]; then  # > 1 year is unreasonable
+            echo "⚠️ Calculated lock age is unreasonable: ${age}s"
+            return 1  # Keep the lock, consider it active
+        fi
+        
+        if [ $age -gt $LOCK_TIMEOUT ]; then
+            echo "⏰ Existing lock expired (age: ${age}s), removing..."
+            aws s3 rm "s3://$BUCKET_NAME/$LOCK_KEY" \
+                --endpoint-url "$AWS_ENDPOINT_URL_S3" >/dev/null 2>&1 || true
+            return 0
+        else
+            echo "🔒 Active lock found (age: ${age}s), waiting..."
+            return 1
         fi
     fi
     return 0
@@ -98,6 +153,7 @@ check_lock_expiry() {
 # Try to acquire lock with retry logic
 MAX_RETRIES=10
 RETRY_COUNT=0
+BASE_WAIT=30  # Base wait time in seconds
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if acquire_lock; then
@@ -108,7 +164,8 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             continue  # Try again after removing expired lock
         else
             RETRY_COUNT=$((RETRY_COUNT + 1))
-            WAIT_TIME=$((RETRY_COUNT * 30))  # Exponential backoff
+            # Exponential backoff: 30s, 60s, 120s, 240s, etc.
+            WAIT_TIME=$((BASE_WAIT * (1 << (RETRY_COUNT - 1))))
             echo "⏳ Waiting ${WAIT_TIME}s before retry (attempt $RETRY_COUNT/$MAX_RETRIES)..."
             sleep $WAIT_TIME
         fi
