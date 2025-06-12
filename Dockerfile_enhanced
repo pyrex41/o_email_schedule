@@ -32,6 +32,8 @@ FROM debian:bookworm-slim as runtime
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
+    musl \
+    libgmp10 \
     sqlite3 \
     libsqlite3-0 \
     ca-certificates \
