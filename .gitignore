@@ -75,3 +75,6 @@ package-lock.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Secrets file (do not version control)
+.secret.env
