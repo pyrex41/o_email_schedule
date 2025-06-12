@@ -303,7 +303,7 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
         FROM contact_events 
         WHERE event_type = 'eligibility_answered'
       ) ce ON c.id = ce.contact_id AND ce.rn = 1
-      WHERE c.email IS NOT NULL AND c.email != '' %s
+      WHERE c.email IS NOT NULL AND c.email <> '' %s
     |} date_condition in
     
     (* Fallback query without contact_events dependency *)
@@ -316,7 +316,7 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
              COALESCE(c.current_carrier, '') as carrier,
              0 as failed_underwriting
       FROM contacts c
-      WHERE c.email IS NOT NULL AND c.email != '' %s
+      WHERE c.email IS NOT NULL AND c.email <> '' %s
     |} date_condition in
     
     (* Try full query first, fallback if it fails *)
@@ -378,7 +378,7 @@ let get_all_contacts () =
       FROM contact_events 
       WHERE event_type = 'eligibility_answered'
     ) ce ON c.id = ce.contact_id AND ce.rn = 1
-    WHERE c.email IS NOT NULL AND c.email != '' 
+    WHERE c.email IS NOT NULL AND c.email <> '' 
     ORDER BY c.id
   |} in
   
@@ -392,7 +392,7 @@ let get_all_contacts () =
            COALESCE(c.current_carrier, '') as carrier,
            0 as failed_underwriting
     FROM contacts c
-    WHERE c.email IS NOT NULL AND c.email != '' 
+    WHERE c.email IS NOT NULL AND c.email <> '' 
     ORDER BY c.id
   |} in
   
@@ -412,7 +412,7 @@ let get_all_contacts () =
 
 (* Get total contact count with native SQLite *)
 let get_total_contact_count () =
-  let query = "SELECT COUNT(*) FROM contacts WHERE email IS NOT NULL AND email != ''" in
+  let query = "SELECT COUNT(*) FROM contacts WHERE email IS NOT NULL AND email <> ''" in
   match execute_sql_safe query with
   | Ok [[count_str]] -> 
       (try Ok (int_of_string count_str) 
@@ -1408,7 +1408,7 @@ let get_all_contacts_for_campaign () =
   let query = {|
     SELECT id, email, zip_code, state, birth_date, effective_date
     FROM contacts
-    WHERE email IS NOT NULL AND email != '' 
+    WHERE email IS NOT NULL AND email <> '' 
     AND zip_code IS NOT NULL AND zip_code != ''
     ORDER BY id
   |} in
