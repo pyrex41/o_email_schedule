@@ -5,6 +5,7 @@ open Exclusion_window
 open Load_balancer
 open Config
 open Database
+open System_constants
 
 type scheduling_context = {
   config: Config.t;
@@ -55,7 +56,6 @@ let generate_run_id () =
  * 
  * Parameters:
  *   - config: Configuration object containing organization settings and email timing
- *   - total_contacts: Total number of contacts to be processed for load balancing calculations
  * 
  * Returns:
  *   scheduling_context record with all initialized components
@@ -74,10 +74,10 @@ let generate_run_id () =
  * 
  * @integration_point @state_machine
  *)
-let create_context config total_contacts =
+let create_context config =
   let run_id = generate_run_id () in
   let start_time = current_datetime () in
-  let load_balancing_config = default_config total_contacts in
+  let load_balancing_config = Config.to_load_balancing_config config in
   { config; run_id; start_time; load_balancing_config }
 
 (** 
@@ -285,7 +285,7 @@ let should_send_effective_date_email config _contact effective_date =
  * @business_rule @data_flow @performance
  *)
 let calculate_campaign_emails context campaign_instance campaign_config =
-  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+  let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
   let schedules = ref [] in
   
   (* Get contacts for this campaign with targeting *)
@@ -381,14 +381,14 @@ let calculate_campaign_emails context campaign_instance campaign_config =
           (* Check exclusion windows if required *)
           let should_skip = 
             if campaign_config.respect_exclusion_windows then
-              should_skip_email contact email_type scheduled_date
+              should_skip_email context.config.organization contact email_type scheduled_date
             else
               false
           in
           
           let (status, _skip_reason) = 
             if should_skip then
-              let reason = match check_exclusion_window contact scheduled_date with
+              let reason = match check_exclusion_window context.config.organization contact scheduled_date with
                 | Excluded { reason; _ } -> reason
                 | NotExcluded -> "Unknown exclusion"
               in
@@ -448,7 +448,7 @@ let calculate_anniversary_emails context contact =
   let today = current_date () in
   let schedules = ref [] in
   
-  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+  let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
   
   (* Check organization-level underwriting exclusion for anniversary emails *)
   if context.config.organization.exclude_failed_underwriting_global && contact.failed_underwriting then
@@ -458,9 +458,9 @@ let calculate_anniversary_emails context contact =
     begin match contact.birthday with
     | Some birthday ->
         let next_bday = next_anniversary today birthday in
-        let birthday_send_date = add_days next_bday (-context.config.birthday_days_before) in
+        let birthday_send_date = add_days next_bday (-context.config.organization.birthday_days_before) in
         
-        if not (should_skip_email contact (Anniversary Birthday) birthday_send_date) then
+        if not (should_skip_email context.config.organization contact (Anniversary Birthday) birthday_send_date) then
           let schedule = {
             contact_id = contact.id;
             email_type = Anniversary Birthday;
@@ -474,7 +474,7 @@ let calculate_anniversary_emails context contact =
           } in
           schedules := schedule :: !schedules
         else
-          let skip_reason = match check_exclusion_window contact birthday_send_date with
+          let skip_reason = match check_exclusion_window context.config.organization contact birthday_send_date with
             | Excluded { reason; _ } -> reason
             | NotExcluded -> "Unknown exclusion"
           in
@@ -498,9 +498,9 @@ let calculate_anniversary_emails context contact =
         (* Check if enough time has passed since effective date *)
         if should_send_effective_date_email context.config contact ed then
           let next_ed = next_anniversary today ed in
-          let ed_send_date = add_days next_ed (-context.config.effective_date_days_before) in
+          let ed_send_date = add_days next_ed (-context.config.organization.effective_date_days_before) in
           
-          if not (should_skip_email contact (Anniversary EffectiveDate) ed_send_date) then
+          if not (should_skip_email context.config.organization contact (Anniversary EffectiveDate) ed_send_date) then
             let schedule = {
               contact_id = contact.id;
               email_type = Anniversary EffectiveDate;
@@ -514,7 +514,7 @@ let calculate_anniversary_emails context contact =
             } in
             schedules := schedule :: !schedules
           else
-            let skip_reason = match check_exclusion_window contact ed_send_date with
+            let skip_reason = match check_exclusion_window context.config.organization contact ed_send_date with
               | Excluded { reason; _ } -> reason
               | NotExcluded -> "Unknown exclusion"
             in
@@ -570,9 +570,9 @@ let calculate_post_window_emails context contact =
   if not context.config.organization.enable_post_window_emails then
     []
   else
-    match get_post_window_date contact with
+    match get_post_window_date context.config.organization contact with
     | Some post_date ->
-        let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+        let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
         let schedule = {
           contact_id = contact.id;
           email_type = Anniversary PostWindow;
@@ -614,7 +614,8 @@ let generate_post_window_for_skipped context skipped_schedules =
     []
   else
     let post_window_schedules = ref [] in
-    let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
+    let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
+    let seen_post_windows = ref [] in  (* Track (contact_id, date) pairs to avoid duplicates *)
     
     List.iter (fun (schedule : email_schedule) ->
       match schedule.status with
@@ -624,20 +625,24 @@ let generate_post_window_for_skipped context skipped_schedules =
            | Ok (contacts : contact list) ->
                (match List.find_opt (fun (c : contact) -> c.id = schedule.contact_id) contacts with
                 | Some contact ->
-                    (match get_post_window_date contact with
+                    (match get_post_window_date context.config.organization contact with
                      | Some post_date ->
-                         let post_window_schedule = {
-                           contact_id = schedule.contact_id;
-                           email_type = Anniversary PostWindow;
-                           scheduled_date = post_date;
-                           scheduled_time = send_time;
-                           status = PreScheduled;
-                           priority = priority_of_email_type (Anniversary PostWindow);
-                           template_id = Some "post_window_template";
-                           campaign_instance_id = None;
-                           scheduler_run_id = context.run_id;
-                         } in
-                         post_window_schedules := post_window_schedule :: !post_window_schedules
+                         let key = (schedule.contact_id, post_date) in
+                         if not (List.mem key !seen_post_windows) then (
+                           seen_post_windows := key :: !seen_post_windows;
+                           let post_window_schedule = {
+                             contact_id = schedule.contact_id;
+                             email_type = Anniversary PostWindow;
+                             scheduled_date = post_date;
+                             scheduled_time = send_time;
+                             status = PreScheduled;
+                             priority = priority_of_email_type (Anniversary PostWindow);
+                             template_id = Some "post_window_template";
+                             campaign_instance_id = None;
+                             scheduler_run_id = context.run_id;
+                           } in
+                           post_window_schedules := post_window_schedule :: !post_window_schedules
+                         )
                      | None -> ())
                 | None -> ())
            | Error _ -> ())
@@ -685,8 +690,7 @@ let calculate_schedules_for_contact context contact =
       })
     else
       let anniversary_schedules = calculate_anniversary_emails context contact in
-      let post_window_schedules = calculate_post_window_emails context contact in
-      let all_schedules = anniversary_schedules @ post_window_schedules in
+      let all_schedules = anniversary_schedules in
       Ok all_schedules
   with e ->
     Error (UnexpectedError e)
@@ -981,8 +985,8 @@ let determine_followup_type contact_id since_date =
  *)
 let calculate_followup_emails context =
   let schedules = ref [] in
-  let send_time = schedule_time_ct context.config.send_time_hour context.config.send_time_minute in
-  let lookback_days = 35 in (* Look back 35 days for eligible emails *)
+  let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
+  let lookback_days = SystemConstants.followup_lookback_days in
   
   match get_sent_emails_for_followup lookback_days with
   | Error _ -> !schedules (* Return empty list on error *)
@@ -1028,7 +1032,7 @@ let calculate_followup_emails context =
           | Error _ -> () (* Skip on error *)
           | Ok followup_type ->
               (* Schedule follow-up for configured delay after sent date *)
-              let followup_date = add_days sent_date context.config.followup_delay_days in
+              let followup_date = add_days sent_date SystemConstants.followup_delay_days in
               let today = current_date () in
               
               (* If follow-up is overdue, schedule for tomorrow *)
@@ -1047,11 +1051,11 @@ let calculate_followup_emails context =
                         let email_type = Followup followup_type in
                         
                         (* Check exclusion windows *)
-                        let should_skip = should_skip_email contact email_type scheduled_date in
+                        let should_skip = should_skip_email context.config.organization contact email_type scheduled_date in
                         
                         let (status, _skip_reason) = 
                           if should_skip then
-                            let reason = match check_exclusion_window contact scheduled_date with
+                            let reason = match check_exclusion_window context.config.organization contact scheduled_date with
                               | Excluded { reason; _ } -> reason
                               | NotExcluded -> "Unknown exclusion"
                             in
@@ -1129,7 +1133,7 @@ let apply_frequency_limits context schedules =
     
     List.iter (fun (schedule : email_schedule) ->
       (* Calculate period for this email *)
-      let period_start = add_days schedule.scheduled_date (-context.config.period_days) in
+      let period_start = add_days schedule.scheduled_date (-context.config.organization.frequency_period_days) in
       let period_start_str = string_of_date period_start in
       let proposed_date_str = string_of_date schedule.scheduled_date in
       
@@ -1162,7 +1166,7 @@ let apply_frequency_limits context schedules =
             
             let total_count = db_count + batch_count in
             
-            if total_count >= context.config.max_emails_per_period then
+            if total_count >= context.config.organization.max_emails_per_period then
               (* Create skipped version due to frequency limits *)
               let limited_schedule = {
                 schedule with 
@@ -1277,7 +1281,7 @@ let resolve_campaign_conflicts schedules =
  * Parameters:
  *   - contacts: List of all contacts to process for anniversary emails
  *   - config: Configuration containing organization settings and timing
- *   - total_contacts: Total contact count for load balancing calculations
+ *   - _total_contacts: Total contact count for load balancing calculations
  * 
  * Returns:
  *   Result containing batch_result with all schedules and metrics, or scheduler_error
@@ -1299,10 +1303,10 @@ let resolve_campaign_conflicts schedules =
  * 
  * @integration_point @state_machine @performance
  *)
-let schedule_emails_streaming ~contacts ~config ~total_contacts =
+let schedule_emails_streaming ~contacts ~config ~_total_contacts =
   try
-    let context = create_context config total_contacts in
-    let chunk_size = config.batch_size in
+    let context = create_context config in
+    let chunk_size = config.load_balancing.batch_size in
     
     (* Manage campaign lifecycle before scheduling *)
     let _ = manage_campaign_lifecycle context in

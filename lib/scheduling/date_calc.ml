@@ -1,10 +1,8 @@
 open Date_time
 open Dsl
 
-let pre_window_buffer_days = 60
-
-let in_exclusion_window check_date window anchor_date =
-  let window_start_offset = -(window.before_days + pre_window_buffer_days) in
+let in_exclusion_window check_date window anchor_date pre_buffer_days =
+  let window_start_offset = -(window.before_days + pre_buffer_days) in
   let window_end_offset = window.after_days in
   
   let check_year anchor =

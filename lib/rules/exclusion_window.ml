@@ -15,6 +15,7 @@ type exclusion_result =
  *   rules that prevent sending emails during sensitive periods around birthdays.
  * 
  * Parameters:
+ *   - org_config: Organization configuration containing buffer settings
  *   - contact: Contact record containing state and birthday information
  *   - check_date: Date to evaluate against exclusion window
  * 
@@ -25,6 +26,7 @@ type exclusion_result =
  *   - Requires both state and birthday data to apply exclusion
  *   - Looks up state-specific window configuration for birthday emails
  *   - Calculates next birthday anniversary relative to check date
+ *   - Uses organization-specific or state-specific buffer override
  *   - Determines if check date falls within configured exclusion window
  *   - Provides specific exclusion reason including state information
  * 
@@ -37,13 +39,18 @@ type exclusion_result =
  * 
  * @business_rule @state_machine
  *)
-let check_birthday_exclusion contact check_date =
+let check_birthday_exclusion (org_config : enhanced_organization_config) contact check_date =
   match contact.state, contact.birthday with
   | Some state, Some birthday ->
       begin match get_window_for_email_type state (Anniversary Birthday) with
       | Some window ->
           let next_bday = next_anniversary check_date birthday in
-          if in_exclusion_window check_date window next_bday then
+          (* Check for state-specific override first *)
+          let pre_buffer = match Database.get_state_buffer_override org_config.id state with
+            | Some buffer -> buffer
+            | None -> org_config.pre_exclusion_buffer_days
+          in
+          if in_exclusion_window check_date window next_bday pre_buffer then
             let window_end = add_days next_bday window.after_days in
             Excluded { 
               reason = Printf.sprintf "Birthday exclusion window for %s" (string_of_state state);
@@ -63,6 +70,7 @@ let check_birthday_exclusion contact check_date =
  *   rules that prevent sending emails during sensitive periods around policy anniversaries.
  * 
  * Parameters:
+ *   - org_config: Organization configuration containing buffer settings
  *   - contact: Contact record containing state and effective_date information
  *   - check_date: Date to evaluate against exclusion window
  * 
@@ -73,6 +81,7 @@ let check_birthday_exclusion contact check_date =
  *   - Requires both state and effective date data to apply exclusion
  *   - Looks up state-specific window configuration for effective date emails
  *   - Calculates next effective date anniversary relative to check date
+ *   - Uses organization-specific or state-specific buffer override
  *   - Determines if check date falls within configured exclusion window
  *   - Provides specific exclusion reason including state information
  * 
@@ -85,13 +94,18 @@ let check_birthday_exclusion contact check_date =
  * 
  * @business_rule @state_machine
  *)
-let check_effective_date_exclusion contact check_date =
+let check_effective_date_exclusion (org_config : enhanced_organization_config) contact check_date =
   match contact.state, contact.effective_date with
   | Some state, Some ed ->
       begin match get_window_for_email_type state (Anniversary EffectiveDate) with
       | Some window ->
           let next_ed = next_anniversary check_date ed in
-          if in_exclusion_window check_date window next_ed then
+          (* Check for state-specific override first *)
+          let pre_buffer = match Database.get_state_buffer_override org_config.id state with
+            | Some buffer -> buffer
+            | None -> org_config.pre_exclusion_buffer_days
+          in
+          if in_exclusion_window check_date window next_ed pre_buffer then
             let window_end = add_days next_ed window.after_days in
             Excluded { 
               reason = Printf.sprintf "Effective date exclusion window for %s" (string_of_state state);
@@ -148,6 +162,7 @@ let check_year_round_exclusion contact =
  *   email should be excluded for a contact on a specific date.
  * 
  * Parameters:
+ *   - org_config: Organization configuration containing buffer settings
  *   - contact: Contact record with state, birthday, and effective_date information
  *   - check_date: Date to evaluate against all applicable exclusion rules
  * 
@@ -169,13 +184,13 @@ let check_year_round_exclusion contact =
  * 
  * @business_rule @integration_point
  *)
-let check_exclusion_window contact check_date =
+let check_exclusion_window org_config contact check_date =
   match check_year_round_exclusion contact with
   | Excluded _ as result -> result
   | NotExcluded ->
-      match check_birthday_exclusion contact check_date with
+      match check_birthday_exclusion org_config contact check_date with
       | Excluded _ as result -> result
-      | NotExcluded -> check_effective_date_exclusion contact check_date
+      | NotExcluded -> check_effective_date_exclusion org_config contact check_date
 
 (** 
  * [should_skip_email]: Determines if specific email type should be skipped for contact
@@ -185,6 +200,7 @@ let check_exclusion_window contact check_date =
  *   email type-specific policies like campaign respect_exclusions settings.
  * 
  * Parameters:
+ *   - org_config: Organization configuration containing buffer settings
  *   - contact: Contact record for exclusion rule evaluation
  *   - email_type: Type of email being considered (Campaign, Anniversary, etc.)
  *   - check_date: Scheduled date for the email
@@ -207,12 +223,12 @@ let check_exclusion_window contact check_date =
  * 
  * @business_rule @integration_point
  *)
-let should_skip_email contact email_type check_date =
+let should_skip_email org_config contact email_type check_date =
   match email_type with
   | Campaign c when not c.respect_exclusions -> false
   | Anniversary PostWindow -> false
   | _ ->
-      match check_exclusion_window contact check_date with
+      match check_exclusion_window org_config contact check_date with
       | NotExcluded -> false
       | Excluded _ -> true
 
@@ -224,6 +240,7 @@ let should_skip_email contact email_type check_date =
  *   windows end, enabling recovery of missed anniversary communications.
  * 
  * Parameters:
+ *   - org_config: Organization configuration containing buffer settings
  *   - contact: Contact record for exclusion window evaluation
  * 
  * Returns:
@@ -244,11 +261,11 @@ let should_skip_email contact email_type check_date =
  * 
  * @business_rule @data_flow
  *)
-let get_post_window_date contact =
+let get_post_window_date org_config contact =
   let today = current_date () in
   let exclusions = [
-    check_birthday_exclusion contact today;
-    check_effective_date_exclusion contact today
+    check_birthday_exclusion org_config contact today;
+    check_effective_date_exclusion org_config contact today
   ] in
   
   let latest_window_end = 

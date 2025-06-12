@@ -1,0 +1,8 @@
+(executable
+ (public_name ocaml-visualizer)
+ (name visualizer_cli)
+ (libraries
+  scheduler.visualizer
+  cmdliner
+  unix
+  yojson))

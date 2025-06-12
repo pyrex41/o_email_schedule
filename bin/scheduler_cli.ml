@@ -1,11 +1,22 @@
 open Scheduler.Email_scheduler
 open Scheduler.Db.Database
 
-let run_scheduler db_path =
-  Printf.printf "[%s] 🚀 Starting email scheduler...\n%!" 
-    (Unix.time () |> Unix.localtime |> fun tm -> 
-     Printf.sprintf "%02d:%02d:%02d" tm.tm_hour tm.tm_min tm.tm_sec);
+let timestamp () =
+  Unix.time () |> Unix.localtime |> fun tm -> 
+  Printf.sprintf "%02d:%02d:%02d" tm.tm_hour tm.tm_min tm.tm_sec
+
+let run_scheduler db_path org_id =
+  Printf.printf "[%s] 🚀 Starting email scheduler...\n%!" (timestamp ());
+  Printf.printf "[INFO] Organization ID: %d\n%!" org_id;
+  Printf.printf "[INFO] Database: %s\n%!" db_path;
   
+  (* Load configuration from central database *)
+  let config = Scheduler.Config.load_for_org org_id db_path in
+  Printf.printf "[INFO] Loaded config for: %s\n%!" config.organization.name;
+  Printf.printf "[INFO] Size profile: %s\n%!" (Scheduler.Types.string_of_size_profile config.organization.size_profile);
+  Printf.printf "[INFO] Daily cap: %.1f%%\n%!" (config.load_balancing.daily_send_percentage_cap *. 100.0);
+  
+  (* Set the org-specific database path *)
   set_db_path db_path;
   
   match initialize_database () with
@@ -33,8 +44,7 @@ let run_scheduler db_path =
           Printf.printf "[INFO] Starting scheduler run: %s\n%!" run_id;
           
           (* Create context and process schedules *)
-          let config = Scheduler.Config.default in
-          let context = create_context config contact_count in
+          let context = create_context config in
           let context_with_run_id = { context with run_id } in
           
           let total_schedules = ref 0 in
@@ -70,13 +80,20 @@ let run_scheduler db_path =
 
 let main () =
   let argc = Array.length Sys.argv in
-  if argc < 2 then (
-    Printf.printf "Usage: %s <database_path>\n" Sys.argv.(0);
-    Printf.printf "Example: %s /app/data/contacts.sqlite3\n" Sys.argv.(0);
+  if argc < 3 then (
+    Printf.printf "Usage: %s <database_path> <org_id>\n" Sys.argv.(0);
+    Printf.printf "Example: %s /app/data/contacts.sqlite3 206\n" Sys.argv.(0);
     exit 1
   );
   
   let db_path = Sys.argv.(1) in
-  run_scheduler db_path
+  let org_id = 
+    try int_of_string Sys.argv.(2)
+    with Failure _ ->
+      Printf.printf "Error: Invalid organization ID '%s'. Must be a valid integer.\n" Sys.argv.(2);
+      Printf.printf "Example: %s /app/data/contacts.sqlite3 206\n" Sys.argv.(0);
+      exit 1
+  in
+  run_scheduler db_path org_id
 
 let () = main () 

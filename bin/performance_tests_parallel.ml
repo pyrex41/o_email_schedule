@@ -103,7 +103,7 @@ let run_parallel_scheduler_with_metrics db_path test_name =
             let (all_schedules, schedule_time) = time_it (fun () ->
               let schedule_contact contact =
                 let config = Scheduler.Config.default in
-                let context = create_context config contact_count in
+                let context = create_context config in
                 let context_with_run_id = { context with run_id = scheduler_run_id } in
                 match calculate_schedules_for_contact context_with_run_id contact with
                 | Ok contact_schedules -> contact_schedules

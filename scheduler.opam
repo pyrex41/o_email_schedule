@@ -7,7 +7,7 @@ description:
 maintainer: ["Maintainer Name <maintainer@example.com>"]
 authors: ["Author Name <author@example.com>"]
 license: "LICENSE"
-tags: ["email" "scheduling" "business rules" "campaigns"]
+tags: ["email" "scheduling" "business rules" "campaigns" "visualization"]
 homepage: "https://github.com/username/reponame"
 doc: "https://url/to/documentation"
 bug-reports: "https://github.com/username/reponame/issues"
@@ -26,6 +26,11 @@ depends: [
   "alcotest"
   "bisect_ppx"
   "ctypes"
+  "ppxlib"
+  "ocamlgraph"
+  "re"
+  "fmt"
+  "cmdliner"
   "odoc" {with-doc}
 ]
 build: [

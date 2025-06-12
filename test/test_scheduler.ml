@@ -4,6 +4,26 @@ open Scheduler.Dsl
 open Scheduler.Contact
 open Scheduler.Exclusion_window
 
+(* Helper function to create a default organization config for tests *)
+let default_org_config = {
+  id = 1;
+  name = "Test Organization";
+  enable_post_window_emails = true;
+  effective_date_first_email_months = 11;
+  exclude_failed_underwriting_global = false;
+  send_without_zipcode_for_universal = true;
+  pre_exclusion_buffer_days = 60;
+  birthday_days_before = 14;
+  effective_date_days_before = 30;
+  send_time_hour = 8;
+  send_time_minute = 30;
+  timezone = "America/Chicago";
+  max_emails_per_period = 3;
+  frequency_period_days = 30;
+  size_profile = Medium;
+  config_overrides = None;
+}
+
 let test_date_arithmetic () =
   let date = (2024, 1, 15) in
   let future_date = add_days date 30 in
@@ -84,6 +104,25 @@ let test_contact_validation () =
   Printf.printf " Contact validation tests passed\n"
 
 let test_exclusion_windows () =
+  let org_config = {
+    id = 1;
+    name = "Test Organization";
+    enable_post_window_emails = true;
+    effective_date_first_email_months = 11;
+    exclude_failed_underwriting_global = false;
+    send_without_zipcode_for_universal = true;
+    pre_exclusion_buffer_days = 60;
+    birthday_days_before = 14;
+    effective_date_days_before = 30;
+    send_time_hour = 8;
+    send_time_minute = 30;
+    timezone = "America/Chicago";
+    max_emails_per_period = 3;
+    frequency_period_days = 30;
+    size_profile = Medium;
+    config_overrides = None;
+  } in
+  
   let ca_contact = {
     id = 1;
     email = "test@example.com";
@@ -96,7 +135,7 @@ let test_exclusion_windows () =
   } in
   
   let check_date = (2024, 6, 10) in
-  let result = check_exclusion_window ca_contact check_date in
+  let result = check_exclusion_window default_org_config ca_contact check_date in
   
   assert (match result with Excluded _ -> true | NotExcluded -> false);
   

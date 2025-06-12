@@ -47,3 +47,8 @@ val get_campaign_type_config : string -> (Types.campaign_type_config, db_error) 
 val get_contact_campaigns_for_instance : int -> (Types.contact_campaign list, db_error) result
 val get_all_contacts_for_campaign : unit -> (Types.contact list, db_error) result
 val get_contacts_for_campaign : Types.campaign_instance -> (Types.contact list, db_error) result
+
+(* Organization configuration *)
+val get_enhanced_organization_config : int -> (Types.enhanced_organization_config, db_error) result
+val get_state_buffer_override : int -> Types.state -> int option
+val load_organization_config : int -> (Types.enhanced_organization_config, db_error) result

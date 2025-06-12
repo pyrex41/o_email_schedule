@@ -6,33 +6,47 @@ open Date_time
 let db_handle = ref None
 let db_path = ref "org-206.sqlite3"
 
+(* Close database connection - defined early as it's used by set_db_path *)
+let rec close_database () =
+  match !db_handle with
+  | None -> ()
+  | Some db ->
+      ignore (Sqlite3.db_close db);
+      db_handle := None
+
 (** 
  * [set_db_path]: Sets the database file path for SQLite connections
  * 
  * Purpose:
  *   Configures the SQLite database file location for all subsequent database
  *   operations, enabling environment-specific database configuration.
+ *   Closes any open connection to avoid connection caching issues.
  * 
  * Parameters:
  *   - path: String path to SQLite database file
  * 
  * Returns:
- *   Unit (side effect: updates global database path reference)
+ *   Unit (side effect: updates global database path reference and closes old connection)
  * 
  * Business Logic:
  *   - Updates global database path configuration
  *   - Enables switching between development, test, and production databases
  *   - Must be called before database operations in different environments
+ *   - Closes any open connection to ensure correct database is used
  * 
  * Usage Example:
  *   Called during application initialization to set environment-specific database
  * 
  * Error Cases:
- *   - None expected (simple reference assignment)
+ *   - None expected (simple reference assignment and connection close)
  * 
  * @integration_point
  *)
-let set_db_path path = db_path := path
+and set_db_path path =
+  if !db_path <> path then (
+    close_database (); (* Close any open connection *)
+    db_path := path
+  )
 
 (* Error handling with Result types *)
 type db_error = 
@@ -74,7 +88,9 @@ let string_of_db_error = function
 (* Get or create database connection *)
 let get_db_connection () =
   match !db_handle with
-  | Some db -> Ok db
+  | Some db ->
+      (* Reuse existing connection. It will be refreshed by [set_db_path] when the database path actually changes. *)
+      Ok db
   | None ->
       try
         let db = Sqlite3.db_open !db_path in
@@ -257,45 +273,76 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
   let start_str = Printf.sprintf "%02d-%02d" start_month start_day in
   let end_str = Printf.sprintf "%02d-%02d" end_month end_day in
   
-  (* Updated query to include new fields with fallback for old schema *)
-  let query = 
+  (* Create robust query with fallback logic for different schema versions *)
+  let build_query date_condition =
+    (* First try the full query with contact_events join for failed_underwriting *)
+    let full_query = Printf.sprintf {|
+      SELECT c.id, c.email, 
+             COALESCE(c.zip_code, '') as zip_code, 
+             COALESCE(c.state, '') as state, 
+             COALESCE(c.birth_date, '') as birth_date, 
+             COALESCE(c.effective_date, '') as effective_date,
+             COALESCE(c.current_carrier, '') as carrier,
+             COALESCE(
+               CASE 
+                 WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
+                 THEN 1 
+                 ELSE 0 
+               END, 0
+             ) as failed_underwriting
+      FROM contacts c
+      LEFT JOIN (
+        SELECT contact_id, metadata,
+               ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
+        FROM contact_events 
+        WHERE event_type = 'eligibility_answered'
+      ) ce ON c.id = ce.contact_id AND ce.rn = 1
+      WHERE c.email IS NOT NULL AND c.email <> '' %s
+    |} date_condition in
+    
+    (* Fallback query without contact_events dependency *)
+    let fallback_query = Printf.sprintf {|
+      SELECT c.id, c.email, 
+             COALESCE(c.zip_code, '') as zip_code, 
+             COALESCE(c.state, '') as state, 
+             COALESCE(c.birth_date, '') as birth_date, 
+             COALESCE(c.effective_date, '') as effective_date,
+             COALESCE(c.current_carrier, '') as carrier,
+             0 as failed_underwriting
+      FROM contacts c
+      WHERE c.email IS NOT NULL AND c.email <> '' %s
+    |} date_condition in
+    
+    (* Try full query first, fallback if it fails *)
+    match execute_sql_safe full_query with
+    | Ok rows -> Ok rows
+    | Error _err -> 
+        (* Log the fallback and try simpler query *)
+        Printf.printf "⚠️  Contact events table unavailable, using fallback query without failed_underwriting\n%!";
+        execute_sql_safe fallback_query
+  in
+  
+  (* Build appropriate date condition based on year boundary crossing *)
+  let date_condition = 
     if start_month <= end_month then
       (* Window doesn't cross year boundary - simple case *)
       Printf.sprintf {|
-        SELECT id, email, 
-               COALESCE(zip_code, '') as zip_code, 
-               COALESCE(state, '') as state, 
-               COALESCE(birth_date, '') as birth_date, 
-               COALESCE(effective_date, '') as effective_date,
-               COALESCE(carrier, '') as carrier,
-               COALESCE(failed_underwriting, 0) as failed_underwriting
-        FROM contacts
-        WHERE email IS NOT NULL AND email != '' 
         AND (
-          (strftime('%%m-%%d', birth_date) BETWEEN '%s' AND '%s') OR
-          (strftime('%%m-%%d', effective_date) BETWEEN '%s' AND '%s')
+          (strftime('%%m-%%d', c.birth_date) BETWEEN '%s' AND '%s') OR
+          (strftime('%%m-%%d', c.effective_date) BETWEEN '%s' AND '%s')
         )
       |} start_str end_str start_str end_str
     else
       (* Window crosses year boundary - need to handle two ranges *)
       Printf.sprintf {|
-        SELECT id, email, 
-               COALESCE(zip_code, '') as zip_code, 
-               COALESCE(state, '') as state, 
-               COALESCE(birth_date, '') as birth_date, 
-               COALESCE(effective_date, '') as effective_date,
-               COALESCE(carrier, '') as carrier,
-               COALESCE(failed_underwriting, 0) as failed_underwriting
-        FROM contacts
-        WHERE email IS NOT NULL AND email != '' 
         AND (
-          (strftime('%%m-%%d', birth_date) >= '%s' OR strftime('%%m-%%d', birth_date) <= '%s') OR
-          (strftime('%%m-%%d', effective_date) >= '%s' OR strftime('%%m-%%d', effective_date) <= '%s')
+          (strftime('%%m-%%d', c.birth_date) >= '%s' OR strftime('%%m-%%d', c.birth_date) <= '%s') OR
+          (strftime('%%m-%%d', c.effective_date) >= '%s' OR strftime('%%m-%%d', c.effective_date) <= '%s')
         )
       |} start_str end_str start_str end_str
   in
   
-  match execute_sql_safe query with
+  match build_query date_condition with
   | Error err -> Error err
   | Ok rows ->
       let contacts = List.filter_map parse_contact_row rows in
@@ -303,28 +350,63 @@ let get_contacts_in_scheduling_window lookahead_days lookback_days =
 
 (* Get all contacts with native SQLite - updated for new fields *)
 let get_all_contacts () =
-  let query = {|
-    SELECT id, email, 
-           COALESCE(zip_code, '') as zip_code, 
-           COALESCE(state, '') as state, 
-           COALESCE(birth_date, '') as birth_date, 
-           COALESCE(effective_date, '') as effective_date,
-           COALESCE(carrier, '') as carrier,
-           COALESCE(failed_underwriting, 0) as failed_underwriting
-    FROM contacts
-    WHERE email IS NOT NULL AND email != '' 
-    ORDER BY id
+  (* First try the full query with contact_events join for failed_underwriting *)
+  let full_query = {|
+    SELECT c.id, c.email, 
+           COALESCE(c.zip_code, '') as zip_code, 
+           COALESCE(c.state, '') as state, 
+           COALESCE(c.birth_date, '') as birth_date, 
+           COALESCE(c.effective_date, '') as effective_date,
+           COALESCE(c.current_carrier, '') as carrier,
+           COALESCE(
+             CASE 
+               WHEN ce.metadata IS NOT NULL AND json_extract(ce.metadata, '$.has_medical_conditions') = 'true' 
+               THEN 1 
+               ELSE 0 
+             END, 0
+           ) as failed_underwriting
+    FROM contacts c
+    LEFT JOIN (
+      SELECT contact_id, metadata,
+             ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at DESC) as rn
+      FROM contact_events 
+      WHERE event_type = 'eligibility_answered'
+    ) ce ON c.id = ce.contact_id AND ce.rn = 1
+    WHERE c.email IS NOT NULL AND c.email <> '' 
+    ORDER BY c.id
   |} in
   
-  match execute_sql_safe query with
-  | Error err -> Error err
+  (* Fallback query without contact_events dependency *)
+  let fallback_query = {|
+    SELECT c.id, c.email, 
+           COALESCE(c.zip_code, '') as zip_code, 
+           COALESCE(c.state, '') as state, 
+           COALESCE(c.birth_date, '') as birth_date, 
+           COALESCE(c.effective_date, '') as effective_date,
+           COALESCE(c.current_carrier, '') as carrier,
+           0 as failed_underwriting
+    FROM contacts c
+    WHERE c.email IS NOT NULL AND c.email <> '' 
+    ORDER BY c.id
+  |} in
+  
+  (* Try full query first, fallback if it fails *)
+  match execute_sql_safe full_query with
   | Ok rows ->
       let contacts = List.filter_map parse_contact_row rows in
       Ok contacts
+  | Error _err -> 
+      (* Log the fallback and try simpler query *)
+      Printf.printf "⚠️  Contact events table unavailable, using fallback query without failed_underwriting\n%!";
+      (match execute_sql_safe fallback_query with
+       | Error err -> Error err
+       | Ok rows ->
+           let contacts = List.filter_map parse_contact_row rows in
+           Ok contacts)
 
 (* Get total contact count with native SQLite *)
 let get_total_contact_count () =
-  let query = "SELECT COUNT(*) FROM contacts WHERE email IS NOT NULL AND email != ''" in
+  let query = "SELECT COUNT(*) FROM contacts WHERE email IS NOT NULL AND email <> ''" in
   match execute_sql_safe query with
   | Ok [[count_str]] -> 
       (try Ok (int_of_string count_str) 
@@ -1011,15 +1093,22 @@ let get_contact_interactions contact_id since_date =
   match execute_sql_safe clicks_query with
   | Error err -> Error err
   | Ok [[click_count_str]] ->
+      (* Try to get health answers from contact_events, with fallback *)
       (match execute_sql_safe events_query with
-       | Error err -> Error err
        | Ok [[event_count_str]] ->
            (try
              let has_clicks = int_of_string click_count_str > 0 in
              let has_health_answers = int_of_string event_count_str > 0 in
              Ok (has_clicks, has_health_answers)
            with _ -> Error (ParseError "Invalid interaction count"))
-       | Ok _ -> Error (ParseError "Invalid event result"))
+       | Ok _ -> Error (ParseError "Invalid event result")
+       | Error _err -> 
+           (* Fallback: contact_events table unavailable, assume no health answers *)
+           Printf.printf "⚠️  Contact events table unavailable for interaction check, assuming no health answers\n%!";
+           (try
+             let has_clicks = int_of_string click_count_str > 0 in
+             Ok (has_clicks, false)
+           with _ -> Error (ParseError "Invalid click count")))
   | Ok _ -> Error (ParseError "Invalid click result")
 
 (* Create performance indexes *)
@@ -1091,13 +1180,7 @@ let initialize_database () =
        | Error err -> Error err)
   | Error err -> Error err
 
-(* Close database connection *)
-let close_database () =
-  match !db_handle with
-  | None -> ()
-  | Some db ->
-      ignore (Sqlite3.db_close db);
-      db_handle := None 
+ 
 
 (* Campaign database functions *)
 
@@ -1319,7 +1402,7 @@ let get_all_contacts_for_campaign () =
   let query = {|
     SELECT id, email, zip_code, state, birth_date, effective_date
     FROM contacts
-    WHERE email IS NOT NULL AND email != '' 
+    WHERE email IS NOT NULL AND email <> '' 
     AND zip_code IS NOT NULL AND zip_code != ''
     ORDER BY id
   |} in
@@ -1371,3 +1454,105 @@ let get_contacts_for_campaign campaign_instance =
   | Ok all_contacts ->
       let filtered_contacts = List.filter (fun contact -> contact_matches_targeting contact campaign_instance) all_contacts in
       Ok filtered_contacts
+
+(* Parse organization configuration from database row *)
+let parse_organization_config_row = function
+  | [id_str; name; enable_post_window; ed_months; exclude_failed_uw; send_without_zip;
+     pre_buffer; birthday_before; ed_before; send_hour; send_minute; timezone;
+     max_per_period; period_days; size_profile; config_overrides] ->
+      (try
+        let config_overrides_parsed = 
+          if config_overrides = "" || config_overrides = "NULL" then None
+          else 
+            (try Some (Yojson.Safe.from_string config_overrides |> Yojson.Safe.Util.to_assoc)
+             with _ -> None)
+        in
+        Some {
+          id = int_of_string id_str;
+          name;
+          enable_post_window_emails = (enable_post_window = "1");
+          effective_date_first_email_months = int_of_string ed_months;
+          exclude_failed_underwriting_global = (exclude_failed_uw = "1");
+          send_without_zipcode_for_universal = (send_without_zip = "1");
+          pre_exclusion_buffer_days = int_of_string pre_buffer;
+          birthday_days_before = int_of_string birthday_before;
+          effective_date_days_before = int_of_string ed_before;
+          send_time_hour = int_of_string send_hour;
+          send_time_minute = int_of_string send_minute;
+          timezone;
+          max_emails_per_period = int_of_string max_per_period;
+          frequency_period_days = int_of_string period_days;
+          size_profile = size_profile_of_string size_profile;
+          config_overrides = config_overrides_parsed;
+        }
+      with _ -> None)
+  | _ -> None
+
+(* Execute SQL query on central database replica without modifying global state *)
+let execute_central_db_query query =
+  let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
+    |> Option.value ~default:"sync-service/data/central_replica.db" in
+  try
+    let central_db = Sqlite3.db_open central_db_path in
+    let rows = ref [] in
+    let callback row _headers =
+      let row_data = Array.to_list (Array.map (function Some s -> s | None -> "") row) in
+      rows := row_data :: !rows
+    in
+    let result = match Sqlite3.exec central_db ~cb:callback query with
+      | Sqlite3.Rc.OK -> Ok (List.rev !rows)
+      | rc -> Error (SqliteError (Sqlite3.Rc.to_string rc))
+    in
+    ignore (Sqlite3.db_close central_db);
+    result
+  with Sqlite3.Error msg ->
+    Error (SqliteError msg)
+
+(* Load organization configuration from central database replica *)
+let load_organization_config org_id =
+  let query = Printf.sprintf {|
+    SELECT id, name,
+           enable_post_window_emails, effective_date_first_email_months,
+           exclude_failed_underwriting_global, send_without_zipcode_for_universal,
+           pre_exclusion_buffer_days, birthday_days_before, effective_date_days_before,
+           send_time_hour, send_time_minute, timezone,
+           max_emails_per_period, frequency_period_days,
+           size_profile, COALESCE(config_overrides, '{}') as config_overrides
+    FROM organizations
+    WHERE id = %d AND active = 1
+  |} org_id in
+  
+  match execute_central_db_query query with
+  | Error err -> Error err
+  | Ok [row] -> 
+      (match parse_organization_config_row row with
+       | Some config -> Ok config
+       | None -> Error (ParseError "Failed to parse organization config"))
+  | Ok [] -> Error (ParseError (Printf.sprintf "Organization %d not found" org_id))
+  | Ok _ -> Error (ParseError "Multiple organizations found")
+
+(* Alias for interface compatibility *)
+let get_enhanced_organization_config = load_organization_config
+
+(* Get state-specific buffer override if exists *)
+let get_state_buffer_override org_id state =
+  let central_db_path = Sys.getenv_opt "CENTRAL_REPLICA_DB_PATH" 
+    |> Option.value ~default:"sync-service/data/central_replica.db" in
+  try
+    let central_db = Sqlite3.db_open central_db_path in
+    let stmt = Sqlite3.prepare central_db "SELECT pre_exclusion_buffer_days FROM organization_state_buffers WHERE org_id = ? AND state_code = ?" in
+    ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int org_id)));
+    ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT (string_of_state state)));
+    let result = match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+          let buffer_data = Sqlite3.column stmt 0 in
+          (match buffer_data with
+           | Sqlite3.Data.INT i -> Some (Int64.to_int i)
+           | Sqlite3.Data.TEXT s -> (try Some (int_of_string s) with _ -> None)
+           | _ -> None)
+      | _ -> None
+    in
+    ignore (Sqlite3.finalize stmt);
+    ignore (Sqlite3.db_close central_db);
+    result
+  with Sqlite3.Error _ -> None

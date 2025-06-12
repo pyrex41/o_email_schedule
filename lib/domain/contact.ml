@@ -45,7 +45,7 @@ let is_valid_for_scheduling contact =
   | Error _ -> false
 
 (* Enhanced validation for anniversary emails that considers organization config *)
-let is_valid_for_anniversary_scheduling org_config contact =
+let is_valid_for_anniversary_scheduling (org_config : Types.enhanced_organization_config) contact =
   (* Basic email validation *)
   if not (validate_email contact.email) then
     false
@@ -61,7 +61,7 @@ let is_valid_for_anniversary_scheduling org_config contact =
     | _, Some _ -> true (* Has state, so valid *)
 
 (* Enhanced validation for campaigns that considers targeting and organization config *)
-let is_valid_for_campaign_scheduling org_config campaign_instance contact =
+let is_valid_for_campaign_scheduling (org_config : Types.enhanced_organization_config) campaign_instance contact =
   (* Basic email validation *)
   if not (validate_email contact.email) then
     false

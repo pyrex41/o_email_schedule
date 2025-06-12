@@ -668,4 +668,5 @@ let default_config total_contacts = {
   catch_up_spread_days = 7;
   overage_threshold = 1.2;
   total_contacts;
+  batch_size = 10000;
 }

@@ -56,6 +56,7 @@ Cargo.lock
 
 # Configuration
 .env
+.secret.env
 
 # Dependencies
 node_modules/
