@@ -70,8 +70,8 @@ let org_config_edge_cases = [
     let org_config_disabled = make_org_config ~enable_post_window_emails:false () in
     let org_config_enabled = make_org_config ~enable_post_window_emails:true () in
     
-    let context_disabled = Email_scheduler.create_context {organization = org_config_disabled} 1000 in
-    let context_enabled = Email_scheduler.create_context {organization = org_config_enabled} 1000 in
+    let context_disabled = Email_scheduler.create_context {organization = org_config_disabled} in
+    let context_enabled = Email_scheduler.create_context {organization = org_config_enabled} in
     
     let schedules_disabled = Email_scheduler.calculate_post_window_emails context_disabled contact in
     let schedules_enabled = Email_scheduler.calculate_post_window_emails context_enabled contact in
@@ -113,7 +113,7 @@ let failed_underwriting_edge_cases = [
   ("Anniversary emails with underwriting exclusion", fun () ->
     let contact = make_contact ~failed_underwriting:true ~birthday:(Some (make_date 1990 6 15)) () in
     let org_config = make_org_config ~exclude_failed_underwriting_global:true () in
-    let context = Email_scheduler.create_context {organization = org_config} 1000 in
+    let context = Email_scheduler.create_context {organization = org_config} in
     
     let schedules = Email_scheduler.calculate_anniversary_emails context contact in
     

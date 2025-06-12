@@ -138,7 +138,7 @@ let run_campaign_aware_scheduler db_path =
           );
           
           (* Run the comprehensive scheduling *)
-          match schedule_emails_streaming ~contacts ~config ~total_contacts:contact_count with
+          match schedule_emails_streaming ~contacts ~config ~_total_contacts:contact_count with
           | Ok result ->
               Printf.printf "✅ Scheduling completed successfully!\n\n";
               

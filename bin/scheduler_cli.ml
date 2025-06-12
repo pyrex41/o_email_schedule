@@ -44,7 +44,7 @@ let run_scheduler db_path org_id =
           Printf.printf "[INFO] Starting scheduler run: %s\n%!" run_id;
           
           (* Create context and process schedules *)
-          let context = create_context config contact_count in
+          let context = create_context config in
           let context_with_run_id = { context with run_id } in
           
           let total_schedules = ref 0 in

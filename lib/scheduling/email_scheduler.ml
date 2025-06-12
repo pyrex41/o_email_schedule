@@ -56,7 +56,6 @@ let generate_run_id () =
  * 
  * Parameters:
  *   - config: Configuration object containing organization settings and email timing
- *   - total_contacts: Total number of contacts to be processed for load balancing calculations
  * 
  * Returns:
  *   scheduling_context record with all initialized components
@@ -75,10 +74,10 @@ let generate_run_id () =
  * 
  * @integration_point @state_machine
  *)
-let create_context config total_contacts =
+let create_context config =
   let run_id = generate_run_id () in
   let start_time = current_datetime () in
-  let load_balancing_config = Config.to_load_balancing_config config total_contacts in
+  let load_balancing_config = Config.to_load_balancing_config config in
   { config; run_id; start_time; load_balancing_config }
 
 (** 
@@ -616,6 +615,7 @@ let generate_post_window_for_skipped context skipped_schedules =
   else
     let post_window_schedules = ref [] in
     let send_time = schedule_time_ct context.config.organization.send_time_hour context.config.organization.send_time_minute in
+    let seen_post_windows = ref [] in  (* Track (contact_id, date) pairs to avoid duplicates *)
     
     List.iter (fun (schedule : email_schedule) ->
       match schedule.status with
@@ -627,18 +627,22 @@ let generate_post_window_for_skipped context skipped_schedules =
                 | Some contact ->
                     (match get_post_window_date context.config.organization contact with
                      | Some post_date ->
-                         let post_window_schedule = {
-                           contact_id = schedule.contact_id;
-                           email_type = Anniversary PostWindow;
-                           scheduled_date = post_date;
-                           scheduled_time = send_time;
-                           status = PreScheduled;
-                           priority = priority_of_email_type (Anniversary PostWindow);
-                           template_id = Some "post_window_template";
-                           campaign_instance_id = None;
-                           scheduler_run_id = context.run_id;
-                         } in
-                         post_window_schedules := post_window_schedule :: !post_window_schedules
+                         let key = (schedule.contact_id, post_date) in
+                         if not (List.mem key !seen_post_windows) then (
+                           seen_post_windows := key :: !seen_post_windows;
+                           let post_window_schedule = {
+                             contact_id = schedule.contact_id;
+                             email_type = Anniversary PostWindow;
+                             scheduled_date = post_date;
+                             scheduled_time = send_time;
+                             status = PreScheduled;
+                             priority = priority_of_email_type (Anniversary PostWindow);
+                             template_id = Some "post_window_template";
+                             campaign_instance_id = None;
+                             scheduler_run_id = context.run_id;
+                           } in
+                           post_window_schedules := post_window_schedule :: !post_window_schedules
+                         )
                      | None -> ())
                 | None -> ())
            | Error _ -> ())
@@ -686,8 +690,7 @@ let calculate_schedules_for_contact context contact =
       })
     else
       let anniversary_schedules = calculate_anniversary_emails context contact in
-      let post_window_schedules = calculate_post_window_emails context contact in
-      let all_schedules = anniversary_schedules @ post_window_schedules in
+      let all_schedules = anniversary_schedules in
       Ok all_schedules
   with e ->
     Error (UnexpectedError e)
@@ -1278,7 +1281,7 @@ let resolve_campaign_conflicts schedules =
  * Parameters:
  *   - contacts: List of all contacts to process for anniversary emails
  *   - config: Configuration containing organization settings and timing
- *   - total_contacts: Total contact count for load balancing calculations
+ *   - _total_contacts: Total contact count for load balancing calculations
  * 
  * Returns:
  *   Result containing batch_result with all schedules and metrics, or scheduler_error
@@ -1300,9 +1303,9 @@ let resolve_campaign_conflicts schedules =
  * 
  * @integration_point @state_machine @performance
  *)
-let schedule_emails_streaming ~contacts ~config ~total_contacts =
+let schedule_emails_streaming ~contacts ~config ~_total_contacts =
   try
-    let context = create_context config total_contacts in
+    let context = create_context config in
     let chunk_size = config.load_balancing.batch_size in
     
     (* Manage campaign lifecycle before scheduling *)

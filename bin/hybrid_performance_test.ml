@@ -55,7 +55,7 @@ let parallel_generate_schedules contacts scheduler_run_id contact_count =
       let thread_schedules = ref [] in
       List.iter (fun contact ->
         let config = Scheduler.Config.default in
-        let context = create_context config contact_count in
+        let context = create_context config in
         let context_with_run_id = { context with run_id = scheduler_run_id } in
         match calculate_schedules_for_contact context_with_run_id contact with
         | Ok contact_schedules -> thread_schedules := contact_schedules @ !thread_schedules

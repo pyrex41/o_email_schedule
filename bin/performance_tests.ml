@@ -55,7 +55,7 @@ let run_scheduler_with_metrics db_path test_name =
               let schedules = ref [] in
               List.iter (fun contact ->
                 let config = Scheduler.Config.default in
-                let context = create_context config contact_count in
+                let context = create_context config in
                 let context_with_run_id = { context with run_id = scheduler_run_id } in
                 match calculate_schedules_for_contact context_with_run_id contact with
                 | Ok contact_schedules -> schedules := contact_schedules @ !schedules

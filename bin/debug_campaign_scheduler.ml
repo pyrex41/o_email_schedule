@@ -62,7 +62,7 @@ let run_debug_campaign_scheduler db_path =
              
              let config = Scheduler.Config.default in
              
-             match schedule_emails_streaming ~contacts ~config ~total_contacts:(List.length contacts) with
+             match schedule_emails_streaming ~contacts ~config ~_total_contacts:(List.length contacts) with
              | Ok result ->
                  Printf.printf "✅ Scheduling completed!\n";
                  Printf.printf "   Schedules generated: %d\n" (List.length result.schedules);
