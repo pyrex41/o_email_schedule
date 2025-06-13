@@ -1,0 +1,15 @@
+[2025-06-13 21:25:11] [INFO] \033[1m🎯 Starting Master Testing Framework\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36mSelected tests: quick\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36mParallel execution: false\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36mResults directory: master_test_results_20250613_212511\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36m📋 Prepared 1 test configuration(s)\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36m🔄 Running tests sequentially...\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36m🚀 Starting Quick_Testing...\033[0m
+[2025-06-13 21:25:11] [ERROR] \033[0;31m❌ Quick_Testing failed after 0s\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;36m📋 Generating master test report...\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;32m✅ Master report generated: master_test_results_20250613_212511/MASTER_TEST_REPORT.md\033[0m
+[2025-06-13 21:25:11] [INFO] \033[1;33m🧹 Cleaning up test files...\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;32m✅ Cleanup completed (reports preserved)\033[0m
+[2025-06-13 21:25:11] [INFO] \033[1m🎉 Master Testing Framework Complete!\033[0m
+[2025-06-13 21:25:11] [INFO] \033[0;32m📊 Total execution time: 0s\033[0m
+[2025-06-13 21:25:11] [ERROR] \033[0;31m❌ Some tests failed - check individual reports\033[0m

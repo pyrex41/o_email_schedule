@@ -1,0 +1,22 @@
+[2025-06-13 21:25:46] [INFO] \033[0;36m🏗️  Creating simulation database with 50 contacts...\033[0m
+[2025-06-13 21:25:46] [INFO] \033[1;33m📊 Generating 50 contacts with year-round date distribution...\033[0m
+[2025-06-13 21:25:46] [INFO] \033[0;32m✅ Simulation database created: simulation_database.db\033[0m
+[2025-06-13 21:25:46] [INFO] \033[0;36m📊 Database Summary:\033[0m
+[2025-06-13 21:25:46] [INFO]    Contacts: 50
+[2025-06-13 21:25:46] [INFO]    States: 23
+[2025-06-13 21:25:46] [INFO]    Campaign enrollments: 216
+[2025-06-13 21:25:46] [INFO] \033[1m🚀 Starting Daily Email Scheduler Simulation\033[0m
+[2025-06-13 21:25:46] [INFO] \033[0;36mPeriod: 2025-06-01 to 2025-06-07\033[0m
+[2025-06-13 21:25:46] [INFO] \033[0;36mContacts: 50\033[0m
+[2025-06-13 21:25:47] [INFO] \033[0;36m📊 Generating final analysis...\033[0m
+[2025-06-13 21:25:47] [INFO] \033[0;36m📋 Generating comprehensive simulation report...\033[0m
+[2025-06-13 21:25:47] [INFO] \033[0;32m✅ Simulation report generated: simulation_results_20250613_212546/SIMULATION_REPORT.md\033[0m
+[2025-06-13 21:25:47] [INFO] \033[1m🎉 Simulation Complete!\033[0m
+[2025-06-13 21:25:47] [INFO] \033[0;32m📊 Final Results:\033[0m
+[2025-06-13 21:25:47] [INFO]    Total Days: 7 (Active: 5)
+[2025-06-13 21:25:47] [INFO]    Emails Scheduled: 0
+[2025-06-13 21:25:47] [INFO]    Emails Sent: 1
+[2025-06-13 21:25:47] [INFO]    Final Divergence: -1
+[2025-06-13 21:25:47] [INFO]    Success Rate: %
+[2025-06-13 21:25:47] [INFO] \033[0;36m📋 Full report: simulation_results_20250613_212546/SIMULATION_REPORT.md\033[0m
+[2025-06-13 21:25:47] [INFO] \033[0;36m💾 Database: simulation_database.db\033[0m

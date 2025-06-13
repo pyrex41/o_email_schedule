@@ -1,0 +1,41 @@
+[2025-06-13 21:25:56] [INFO] \033[1m🚀 Starting Massive Performance Test\033[0m
+[2025-06-13 21:25:56] [INFO] \033[0;36mTarget: 1000 contacts\033[0m
+[2025-06-13 21:25:56] [INFO] \033[0;36m💾 Available memory: 57949MB\033[0m
+[2025-06-13 21:25:56] [INFO] \033[0;36m🏗️  Creating optimized database schema...\033[0m
+[2025-06-13 21:25:57] [INFO] \033[0;32m✅ Optimized schema created\033[0m
+[2025-06-13 21:25:57] [INFO] \033[0;36m📊 Generating 1000 contacts in batches of 500...\033[0m
+[2025-06-13 21:25:57] [INFO] \033[1;33m⚡ Pre-generating random data for efficiency...\033[0m
+[2025-06-13 21:25:57] [INFO] \033[0;36m🔄 Starting batch generation...\033[0m
+[2025-06-13 21:26:03] [INFO] \033[0;32m✅ Contact generation complete: 1000 contacts in 6506ms\033[0m
+[2025-06-13 21:26:03] [INFO] \033[0;36m📊 Database Statistics:\033[0m
+[2025-06-13 21:26:03] [INFO]    Total contacts: 1000
+[2025-06-13 21:26:03] [INFO]    Unique states: 42
+[2025-06-13 21:26:03] [INFO]    Birth date range: 1945-01-13 to 2000-11-12
+[2025-06-13 21:26:03] [INFO]    Failed underwriting: 98
+[2025-06-13 21:26:03] [INFO]    Database size: 0MB
+[2025-06-13 21:26:03] [INFO] \033[0;36m🎯 Adding campaigns for massive scale testing...\033[0m
+[2025-06-13 21:26:03] [INFO] \033[1;33m📝 Enrolling contacts in campaigns (sampling for performance)...\033[0m
+[2025-06-13 21:26:03] [INFO] \033[0;32m✅ Campaign enrollment complete: 130 enrollments\033[0m
+[2025-06-13 21:26:03] [INFO] \033[1m🚀 Starting Massive Performance Test\033[0m
+[2025-06-13 21:26:03] [INFO] \033[0;36mTesting with 1000 contacts\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;32m✅ Scheduler execution completed successfully\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;36m📊 Performance Results:\033[0m
+[2025-06-13 21:26:05] [INFO]    Execution time: 1.79s
+[2025-06-13 21:26:05] [INFO]    Contacts processed: 1000
+[2025-06-13 21:26:05] [INFO]    Schedules generated: 4084
+[2025-06-13 21:26:05] [INFO]    Contacts per second: 558
+[2025-06-13 21:26:05] [INFO]    Schedules per second: 2279
+[2025-06-13 21:26:05] [INFO]    Memory start: 5253MB
+[2025-06-13 21:26:05] [INFO]    Memory peak: 2MB
+[2025-06-13 21:26:05] [INFO]    Memory end: 5298MB
+[2025-06-13 21:26:05] [INFO]    Memory growth: 45MB
+[2025-06-13 21:26:05] [INFO] \033[0;36m📋 Analyzing performance results and generating report...\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;32m✅ Performance report generated: performance_results_20250613_212556/MASSIVE_PERFORMANCE_REPORT.md\033[0m
+[2025-06-13 21:26:05] [INFO] \033[1m🎉 Massive Performance Test Complete!\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;32m📊 Final Statistics:\033[0m
+[2025-06-13 21:26:05] [INFO]    Database size: 1MB
+[2025-06-13 21:26:05] [INFO]    Results directory: performance_results_20250613_212556
+[2025-06-13 21:26:05] [INFO] \033[0;32m✅ All tests passed successfully\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;36m📋 Detailed report: performance_results_20250613_212556/MASSIVE_PERFORMANCE_REPORT.md\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;36m💾 Performance database: massive_performance_test.db\033[0m
+[2025-06-13 21:26:05] [INFO] \033[0;36m📊 Memory usage log: performance_results_20250613_212556/memory_usage.csv\033[0m
