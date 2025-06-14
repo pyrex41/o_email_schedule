@@ -140,3 +140,17 @@
  (name chunked_inmemory_test)
  (libraries scheduler))
 
+(executable
+ (public_name multithreaded_inmemory_scheduler)
+ (name multithreaded_inmemory_scheduler)
+ (libraries
+  scheduler
+  threads))
+
+(executable
+ (public_name parallel_inmemory_scheduler)
+ (name parallel_inmemory_scheduler)
+ (libraries
+  scheduler
+  threads))
+
