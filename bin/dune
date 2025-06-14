@@ -161,3 +161,10 @@
   scheduler
   threads))
 
+(executable
+ (public_name high_performance_reliable_scheduler)
+ (name high_performance_reliable_scheduler)
+ (libraries
+  scheduler
+  threads))
+
