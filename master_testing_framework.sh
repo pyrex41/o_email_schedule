@@ -164,12 +164,12 @@ run_test() {
     if [ "$success" = true ]; then
         log "INFO" "${GREEN}✅ $test_name completed successfully in ${duration}s${NC}"
         echo "$test_name|SUCCESS|$duration|$test_dir" >> "$RESULTS_DIR/test_results.txt"
+        return 0
     else
         log "ERROR" "${RED}❌ $test_name failed after ${duration}s${NC}"
         echo "$test_name|FAILED|$duration|$test_dir" >> "$RESULTS_DIR/test_results.txt"
+        return 1
     fi
-    
-    return $success
 }
 
 # Function to run tests in parallel
@@ -194,7 +194,11 @@ run_tests_parallel() {
         fi
     done
     
-    return $all_success
+    if [ "$all_success" = true ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Function to run tests sequentially
@@ -211,7 +215,11 @@ run_tests_sequential() {
         fi
     done
     
-    return $all_success
+    if [ "$all_success" = true ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Function to prepare test configurations

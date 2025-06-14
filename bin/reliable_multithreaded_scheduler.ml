@@ -297,7 +297,14 @@ let main () =
   );
   
   let source_db_path = Sys.argv.(1) in
-  let thread_count = if argc >= 3 then int_of_string Sys.argv.(2) else default_thread_count in
+  let thread_count = 
+    if argc >= 3 then 
+      try int_of_string Sys.argv.(2) 
+      with Failure _ ->
+        Printf.printf "❌ Invalid thread count '%s'. Must be an integer between 1 and 16.\n" Sys.argv.(2);
+        Printf.printf "Usage: %s <source_database_path> [thread_count]\n" Sys.argv.(0);
+        exit 1
+    else default_thread_count in
   
   if thread_count < 1 || thread_count > 16 then (
     Printf.printf "❌ Thread count must be between 1 and 16 (keeping it reasonable)\n";

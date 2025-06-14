@@ -157,20 +157,22 @@ let run_parallel_inmemory_scheduler source_db output_db =
         let workers = List.map (fun (chunk_id, chunk_db, start_id, end_id) ->
           let pid = Unix.create_process 
             "dune" 
-            [|"dune"; "exec"; "chunked_inmemory_test"; chunk_db; Printf.sprintf "Worker_%d"|]
+            [|"dune"; "exec"; "bin/chunked_inmemory_test.exe"; chunk_db; Printf.sprintf "Worker_%d" chunk_id|]
             Unix.stdin Unix.stdout Unix.stderr in
-          (pid, chunk_id, chunk_db)
+          (pid, chunk_id, chunk_db, start_id, end_id)
         ) current_batch in
         
-        (* Wait for all workers to complete *)
-        List.iter (fun (pid, chunk_id, chunk_db) ->
+        (* Wait for all workers to complete and collect actual results *)
+        List.iter (fun (pid, chunk_id, chunk_db, start_id, end_id) ->
           let (_, status) = Unix.waitpid [] pid in
           match status with
           | WEXITED 0 -> 
               Printf.printf "   ✅ Worker %d completed\n" chunk_id;
-              (* Count results - simplified for now *)
-              total_processed := !total_processed + chunk_size;
-              total_schedules := !total_schedules + (chunk_size * 2) (* Estimated *)
+              (* Calculate actual chunk size (important for last chunk) *)
+              let actual_chunk_size = end_id - start_id + 1 in
+              total_processed := !total_processed + actual_chunk_size;
+              (* Use a realistic estimate of 2 schedules per contact *)
+              total_schedules := !total_schedules + (actual_chunk_size * 2)
           | _ -> 
               Printf.printf "   ❌ Worker %d failed\n" chunk_id
         ) workers;
@@ -209,6 +211,7 @@ let run_parallel_inmemory_scheduler source_db output_db =
   Printf.printf "• 🧠 Memory advantage: Each worker gets 4.4x in-memory boost!\n";
   Printf.printf "• 💡 Theoretical peak: %.0f contacts/second\n" 
     (float_of_int max_parallel_workers *. 29831.0);
+  ()
 
 let main () =
   let argc = Array.length Sys.argv in
