@@ -154,3 +154,10 @@
   scheduler
   threads))
 
+(executable
+ (public_name reliable_multithreaded_scheduler)
+ (name reliable_multithreaded_scheduler)
+ (libraries
+  scheduler
+  threads))
+
