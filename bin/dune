@@ -86,6 +86,18 @@
   threads))
 
 (executable
+ (public_name inmemory_campaign_hybrid_test)
+ (name inmemory_campaign_hybrid_test)
+ (libraries
+  scheduler
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson
+  threads))
+
+(executable
  (public_name native_performance_test)
  (name native_performance_test)
  (libraries
@@ -123,5 +135,10 @@
 (executable
  (public_name debug_constraint)
  (name debug_constraint)
+ (libraries scheduler))
+
+(executable
+ (public_name debug_inmemory)
+ (name debug_inmemory)
  (libraries scheduler))
 
