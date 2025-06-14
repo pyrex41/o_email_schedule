@@ -98,7 +98,18 @@ log() {
 # Function to check if date is weekend
 is_weekend() {
     local date="$1"
-    local day_of_week=$(date -d "$date" +%u)  # 1=Monday, 7=Sunday
+    local day_of_week
+    
+    # Check if we're on macOS/BSD (which uses -j flag) or GNU/Linux (which uses -d flag)
+    if date -j -f "%Y-%m-%d" "$date" +%u >/dev/null 2>&1; then
+        # macOS/BSD date command
+        day_of_week=$(date -j -f "%Y-%m-%d" "$date" +%u)
+    else
+        # GNU/Linux date command
+        day_of_week=$(date -d "$date" +%u)
+    fi
+    
+    # 1=Monday, 7=Sunday; 6=Saturday, 7=Sunday are weekends
     [ "$day_of_week" -eq 6 ] || [ "$day_of_week" -eq 7 ]
 }
 
