@@ -18,16 +18,30 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🚀 Comprehensive Email Scheduler Test Suite${NC}"
 echo "=============================================="
 
-# Test configuration
-TEST_RESULTS_DIR="test_results_$(date +%Y%m%d_%H%M%S)"
+# Default configuration
+QUICK_MODE=false
+PERFORMANCE_ONLY=false
 DETAILED_LOGS=false
 CLEANUP_AFTER=false
-PERFORMANCE_ONLY=false
-QUICK_MODE=false
+
+# Scheduler selection (can be "reliable" or "high_performance")
+SCHEDULER_TYPE="${SCHEDULER_TYPE:-reliable}"
+
+# Results directory with timestamp
+TEST_RESULTS_DIR="test_results_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$TEST_RESULTS_DIR"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --quick)
+            QUICK_MODE=true
+            shift
+            ;;
+        --performance-only)
+            PERFORMANCE_ONLY=true
+            shift
+            ;;
         --detailed)
             DETAILED_LOGS=true
             shift
@@ -36,29 +50,39 @@ while [[ $# -gt 0 ]]; do
             CLEANUP_AFTER=true
             shift
             ;;
-        --performance-only)
-            PERFORMANCE_ONLY=true
-            shift
+        --scheduler)
+            SCHEDULER_TYPE="$2"
+            if [ "$SCHEDULER_TYPE" != "reliable" ] && [ "$SCHEDULER_TYPE" != "high_performance" ]; then
+                echo "Error: --scheduler must be either 'reliable' or 'high_performance'"
+                exit 1
+            fi
+            shift 2
             ;;
-        --quick)
-            QUICK_MODE=true
-            shift
-            ;;
-        --help)
-            echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --detailed         Enable detailed logging and output"
-            echo "  --cleanup          Clean up test databases after completion"
-            echo "  --performance-only Run only performance tests"
-            echo "  --quick           Run quick tests only (skip performance)"
-            echo "  --help            Show this help message"
-            echo ""
-            echo "Examples:"
-            echo "  $0                    # Run all tests"
-            echo "  $0 --quick           # Quick test run"
-            echo "  $0 --performance-only # Performance testing only"
-            echo "  $0 --detailed --cleanup # Detailed run with cleanup"
+        --help|-h)
+            cat << EOF
+Comprehensive Email Scheduler Test Suite
+
+Usage: $0 [OPTIONS]
+
+OPTIONS:
+    --quick              Run quick test suite (birthday + campaign tests)
+    --performance-only   Run only performance benchmarks
+    --detailed           Enable detailed logging and analysis
+    --cleanup            Clean up test databases after completion
+    --scheduler TYPE     Select scheduler type: 'reliable' (default) or 'high_performance'
+    --help, -h           Show this help message
+
+SCHEDULER TYPES:
+    reliable             Use reliable_multithreaded_scheduler.exe with 4 threads
+    high_performance     Use high_performance_reliable_scheduler.exe with all optimizations
+
+EXAMPLES:
+    $0                                 # Full test suite with reliable scheduler
+    $0 --quick --detailed              # Quick tests with detailed logging
+    $0 --performance-only --scheduler high_performance  # Performance tests with high-perf scheduler
+    $0 --cleanup --detailed            # Full tests with cleanup and detailed logs
+
+EOF
             exit 0
             ;;
         *)
@@ -68,9 +92,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-# Create results directory
-mkdir -p "$TEST_RESULTS_DIR"
 
 # Logging function
 log() {
@@ -87,35 +108,21 @@ log() {
 
 # Function to check prerequisites
 check_prerequisites() {
-    log "INFO" "${CYAN}🔍 Checking prerequisites...${NC}"
+    log "INFO" "${PURPLE}🔍 Checking prerequisites...${NC}"
     
-    # Check OCaml environment
-    if ! eval $(opam env) 2>/dev/null; then
-        log "ERROR" "${RED}❌ OCaml environment not available${NC}"
+    # Check if we can build the new reliable schedulers
+    if ! dune build bin/reliable_multithreaded_scheduler.exe bin/high_performance_reliable_scheduler.exe 2>/dev/null; then
+        log "ERROR" "${RED}❌ Failed to build reliable schedulers${NC}"
         return 1
     fi
     
-    # Check SQLite
     if ! command -v sqlite3 >/dev/null 2>&1; then
-        log "ERROR" "${RED}❌ SQLite3 not found${NC}"
+        log "ERROR" "${RED}❌ sqlite3 not found${NC}"
         return 1
     fi
     
-    # Check required scripts
-    if [ ! -x "./generate_comprehensive_test_scenarios.sh" ]; then
-        log "ERROR" "${RED}❌ Test scenario generator not found or not executable${NC}"
-        return 1
-    fi
-    
-    if [ ! -x "./validate_test_scenarios.sh" ]; then
-        log "ERROR" "${RED}❌ Test validator not found or not executable${NC}"
-        return 1
-    fi
-    
-    # Check if we can build the scheduler
-    if ! dune build bin/campaign_aware_scheduler.exe 2>/dev/null; then
-        log "ERROR" "${RED}❌ Cannot build scheduler binary${NC}"
-        return 1
+    if ! command -v bc >/dev/null 2>&1; then
+        log "WARN" "${YELLOW}⚠️  bc not found - some calculations may be unavailable${NC}"
     fi
     
     log "INFO" "${GREEN}✅ All prerequisites satisfied${NC}"
@@ -190,10 +197,32 @@ run_detailed_analysis() {
             
             # Run scheduler and capture detailed output
             echo "Scheduler Execution:" >> "$report_file"
-            if timeout 60s dune exec campaign_aware_scheduler "$db" >> "$report_file" 2>&1; then
+            
+            # Select scheduler based on configuration
+            local scheduler_exe=""
+            local scheduler_args=""
+            
+            if [ "$SCHEDULER_TYPE" = "high_performance" ]; then
+                scheduler_exe="bin/high_performance_reliable_scheduler.exe"
+                echo "Using: high_performance_reliable_scheduler" >> "$report_file"
+                scheduler_args="$db"
+            else
+                scheduler_exe="bin/reliable_multithreaded_scheduler.exe"
+                echo "Using: reliable_multithreaded_scheduler with 4 threads" >> "$report_file"
+                scheduler_args="$db 4"
+            fi
+            
+            # Create a temporary file for scheduler output
+            local scheduler_output="$TEST_RESULTS_DIR/${db_name}_scheduler_output.log"
+            
+            if timeout 60s dune exec "$scheduler_exe" -- $scheduler_args > "$scheduler_output" 2>&1; then
                 echo "Scheduler completed successfully" >> "$report_file"
+                echo "--- Scheduler Output ---" >> "$report_file"
+                cat "$scheduler_output" >> "$report_file"
             else
                 echo "Scheduler failed or timed out" >> "$report_file"
+                echo "--- Scheduler Error Output ---" >> "$report_file"
+                cat "$scheduler_output" >> "$report_file"
             fi
             echo "" >> "$report_file"
             
@@ -314,9 +343,14 @@ run_performance_benchmarks() {
         
         # Measure execution time
         echo "Performance test with $size contacts:" >> "$perf_report"
+        echo "Using: high_performance_reliable_scheduler" >> "$perf_report"
+        
+        # Create a temporary file for scheduler output
+        local scheduler_output="$TEST_RESULTS_DIR/perf_${size}_scheduler_output.log"
+        
         local start_time=$(date +%s.%3N 2>/dev/null || date +%s)
         
-        if timeout 180s dune exec campaign_aware_scheduler "$perf_db" >/dev/null 2>&1; then
+        if timeout 180s dune exec bin/high_performance_reliable_scheduler.exe -- "$perf_db" > "$scheduler_output" 2>&1; then
             local end_time=$(date +%s.%3N 2>/dev/null || date +%s)
             local execution_time=$(echo "$end_time - $start_time" | bc -l 2>/dev/null || echo "unknown")
             
@@ -327,6 +361,10 @@ run_performance_benchmarks() {
             echo "  Contacts processed: $contacts" >> "$perf_report"
             echo "  Schedules generated: $schedules" >> "$perf_report"
             
+            # Capture scheduler output
+            echo "  Scheduler output:" >> "$perf_report"
+            sed 's/^/    /' "$scheduler_output" >> "$perf_report"
+            
             if [ "$schedules" -gt 0 ] && [ "$contacts" -gt 0 ]; then
                 local schedules_per_second=$(echo "scale=2; $schedules / $execution_time" | bc -l 2>/dev/null || echo "N/A")
                 echo "  Schedules per second: $schedules_per_second" >> "$perf_report"
@@ -335,6 +373,8 @@ run_performance_benchmarks() {
             log "INFO" "    ${GREEN}✅ $size contacts: ${execution_time}s, $schedules schedules${NC}"
         else
             echo "  FAILED or TIMED OUT" >> "$perf_report"
+            echo "  Error output:" >> "$perf_report"
+            sed 's/^/    /' "$scheduler_output" >> "$perf_report"
             log "WARN" "    ${RED}❌ $size contacts: Failed or timed out${NC}"
         fi
         echo "" >> "$perf_report"
@@ -377,7 +417,8 @@ generate_final_report() {
 # Comprehensive Email Scheduler Test Report
 
 **Generated:** $(date)  
-**Test Suite Version:** Comprehensive Testing Framework v1.0  
+**Test Suite Version:** Comprehensive Testing Framework v2.0  
+**Scheduler Used:** ${SCHEDULER_TYPE} ($([ "$SCHEDULER_TYPE" = "high_performance" ] && echo "high_performance_reliable_scheduler.exe" || echo "reliable_multithreaded_scheduler.exe with 4 threads"))
 **Test Configuration:** 
 - Quick Mode: $QUICK_MODE
 - Performance Only: $PERFORMANCE_ONLY  
@@ -385,13 +426,19 @@ generate_final_report() {
 
 ## Executive Summary
 
-This report contains the results of comprehensive testing of the Email Scheduler system, covering:
+This report contains the results of comprehensive testing of the Email Scheduler system using the **updated reliable schedulers**, covering:
 
 - ✅ Birthday exclusion rule validation across all states
 - ✅ Campaign priority and conflict resolution testing  
 - ✅ Date boundary and leap year handling verification
 - ✅ Performance benchmarking and scalability testing
 - ✅ Real-world mixed scenario validation
+
+**Key Improvements in v2.0:**
+- Updated to use new reliable multithreaded schedulers
+- Enhanced logging with full output capture instead of discarding to /dev/null
+- Configurable scheduler selection (reliable vs high-performance)
+- Better error reporting and debugging capabilities
 
 ## Test Scenarios Executed
 
@@ -538,11 +585,12 @@ EOF
 # Function to cleanup test files
 cleanup_test_files() {
     if [ "$CLEANUP_AFTER" = true ]; then
-        log "INFO" "${YELLOW}🧹 Cleaning up test databases...${NC}"
+        log "INFO" "${YELLOW}🧹 Cleaning up test databases and logs...${NC}"
         rm -f test_*.db perf_test_*.db
-        log "INFO" "${GREEN}✅ Test databases cleaned up${NC}"
+        rm -f "$TEST_RESULTS_DIR"/*_scheduler_output.log
+        log "INFO" "${GREEN}✅ Test databases and logs cleaned up${NC}"
     else
-        log "INFO" "${CYAN}💾 Test databases preserved for manual inspection${NC}"
+        log "INFO" "${CYAN}💾 Test databases and logs preserved for manual inspection${NC}"
         echo "Test databases available:"
         for db in test_*.db; do
             if [ -f "$db" ]; then
@@ -550,6 +598,7 @@ cleanup_test_files() {
                 echo "  $db (${size} bytes)"
             fi
         done
+        echo "Scheduler logs available in: $TEST_RESULTS_DIR/"
     fi
 }
 
