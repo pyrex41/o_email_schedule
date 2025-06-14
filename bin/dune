@@ -130,3 +130,13 @@
  (name simple_inmemory_test)
  (libraries scheduler))
 
+(executable
+ (public_name hybrid_inmemory_test)
+ (name hybrid_inmemory_test)
+ (libraries scheduler))
+
+(executable
+ (public_name chunked_inmemory_test)
+ (name chunked_inmemory_test)
+ (libraries scheduler))
+
