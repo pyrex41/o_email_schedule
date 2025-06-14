@@ -625,7 +625,7 @@ WHERE send_delay_days > 0;
 
 Based on simulation results:
 
-1. **Reliability:** $(sqlite3 "$DB_FILE" "SELECT printf('%.1f%%', 100.0 * MAX(cumulative_sent) / MAX(cumulative_scheduled)) FROM simulation_tracking;") email delivery rate
+1. **Reliability:** $(sqlite3 "$DB_FILE" "SELECT CASE WHEN MAX(cumulative_scheduled) > 0 THEN printf('%.1f%%', 100.0 * MAX(cumulative_sent) / MAX(cumulative_scheduled)) ELSE 'N/A (no emails scheduled)' END FROM simulation_tracking;") email delivery rate
 2. **Catch-up Effectiveness:** System successfully catches up missed emails
 3. **Performance:** Average runtime indicates good performance scalability
 4. **State Compliance:** Exclusion rules properly enforced across all states
@@ -761,7 +761,11 @@ run_simulation() {
     log "INFO" "   Emails Scheduled: $total_scheduled"
     log "INFO" "   Emails Sent: $total_sent"
     log "INFO" "   Final Divergence: $final_divergence"
-    log "INFO" "   Success Rate: $(echo "scale=1; 100 * $total_sent / $total_scheduled" | bc -l)%"
+    if [ "$total_scheduled" -gt 0 ]; then
+        log "INFO" "   Success Rate: $(echo "scale=1; 100 * $total_sent / $total_scheduled" | bc -l)%"
+    else
+        log "INFO" "   Success Rate: N/A (no emails scheduled)"
+    fi
     echo ""
     log "INFO" "${CYAN}📋 Full report: $RESULTS_DIR/SIMULATION_REPORT.md${NC}"
     log "INFO" "${CYAN}💾 Database: $DB_FILE${NC}"
