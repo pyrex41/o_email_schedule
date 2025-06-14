@@ -1,0 +1,52 @@
+# Build artifacts
+_build/
+*.exe
+*.cmx
+*.cmi
+*.cmo
+*.o
+
+# Test databases and results
+*.db
+*_test.db
+*results*/
+test_results_*/
+performance_results_*/
+simulation_results_*/
+fast_performance_*/
+multithreaded_results_*/
+
+# Documentation and development files  
+*.md
+tour.txt
+repomix-output.txt
+*.html
+
+# Git and development
+.git/
+.gitignore
+.cursor/
+.claude/
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store
+temp_*
+
+# Generated files
+zipData.json
+original_dump.sql
+
+# Scripts not needed in container
+*.sh
+*.py
+validate_*.sh
+generate_*.sh
+run_*.sh
+test_*.sh
+
+# Keep only essential deployment files
+!Dockerfile*
+!deploy-scheduler.sh
+!*-scheduler.sh

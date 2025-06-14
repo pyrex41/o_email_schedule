@@ -1,0 +1,68 @@
+# Fly Email Scheduler Machine Configuration
+app = "email-scheduler"
+primary_region = "iad"  # Change to your preferred region
+
+[build]
+  dockerfile = "Dockerfile.scheduler"
+
+[machine]
+  # High-performance machine for scheduler workloads
+  size = "performance-8x"  # 8 vCPU, 16GB RAM - perfect for our 2GB cache + threading
+  memory = "16GB"
+  
+  # Machine lifecycle - designed to be started/stopped on demand
+  auto_destroy = false  # Keep machine when stopped
+  restart_policy = "no"  # Don't auto-restart - manual control
+  
+  # SSH access for debugging and manual operations
+  enable_ssh = true
+
+[env]
+  # Environment variables for the scheduler
+  SCHEDULER_THREADS = "8"
+  SCHEDULER_MODE = "high-performance"
+  DATA_PATH = "/data"
+
+# Persistent volume configuration - 10GB for database storage
+[[mounts]]
+  source = "scheduler_data"
+  destination = "/data"
+  type = "volume"
+
+# Volume creation (run once during setup)
+[[volume]]
+  name = "scheduler_data"
+  size = "10gb"
+  region = "iad"  # Match primary_region
+
+# Optional: HTTP service for health checks and status
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = false
+  
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 10
+    soft_limit = 5
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["http", "tls"]
+
+# Process configuration for scheduler runs
+[[processes]]
+  name = "scheduler"
+  entrypoint = ["scheduler-help"]
+  
+# VM configuration optimized for compute workloads
+[vm]
+  memory = "16GB"
+  cpus = 8
+  cpu_kind = "performance"

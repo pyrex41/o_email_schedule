@@ -74,6 +74,18 @@
   threads))
 
 (executable
+ (public_name campaign_hybrid_performance_test)
+ (name campaign_hybrid_performance_test)
+ (libraries
+  scheduler
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson
+  threads))
+
+(executable
  (public_name native_performance_test)
  (name native_performance_test)
  (libraries
@@ -112,4 +124,47 @@
  (public_name debug_constraint)
  (name debug_constraint)
  (libraries scheduler))
+
+(executable
+ (public_name simple_inmemory_test)
+ (name simple_inmemory_test)
+ (libraries scheduler))
+
+(executable
+ (public_name hybrid_inmemory_test)
+ (name hybrid_inmemory_test)
+ (libraries scheduler))
+
+(executable
+ (public_name chunked_inmemory_test)
+ (name chunked_inmemory_test)
+ (libraries scheduler))
+
+(executable
+ (public_name multithreaded_inmemory_scheduler)
+ (name multithreaded_inmemory_scheduler)
+ (libraries
+  scheduler
+  threads))
+
+(executable
+ (public_name parallel_inmemory_scheduler)
+ (name parallel_inmemory_scheduler)
+ (libraries
+  scheduler
+  threads))
+
+(executable
+ (public_name reliable_multithreaded_scheduler)
+ (name reliable_multithreaded_scheduler)
+ (libraries
+  scheduler
+  threads))
+
+(executable
+ (public_name high_performance_reliable_scheduler)
+ (name high_performance_reliable_scheduler)
+ (libraries
+  scheduler
+  threads))
 

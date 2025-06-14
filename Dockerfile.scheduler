@@ -1,0 +1,122 @@
+# High-Performance Email Scheduler for Fly Machines
+FROM ocaml/opam:alpine-ocaml-5.1
+
+# Install system dependencies
+USER root
+RUN apk add --no-cache \
+    sqlite \
+    sqlite-dev \
+    ca-certificates \
+    curl \
+    bash \
+    rsync \
+    openssh-client \
+    && rm -rf /var/cache/apk/*
+
+# Create app directory and set permissions
+RUN mkdir -p /app/data && chown -R opam:opam /app
+USER opam
+WORKDIR /app
+
+# Copy project files
+COPY --chown=opam:opam . .
+
+# Install OCaml dependencies and build
+RUN eval $(opam env) && \
+    opam install -y dune sqlite3 lwt ptime timedesc yojson threads cmdliner && \
+    dune build bin/reliable_multithreaded_scheduler.exe bin/high_performance_reliable_scheduler.exe
+
+# Create convenient scripts
+USER root
+RUN echo '#!/bin/bash\neval $(opam env)\nexec "$@"' > /usr/local/bin/with-opam && \
+    chmod +x /usr/local/bin/with-opam
+
+# Create scheduler execution scripts
+RUN cat > /usr/local/bin/run-reliable-scheduler << 'EOF'
+#!/bin/bash
+set -e
+eval $(opam env)
+cd /app
+echo "🔒 Starting RELIABLE scheduler..."
+echo "Database: $1"
+echo "Threads: ${2:-8}"
+echo "Volume: /data"
+exec dune exec bin/reliable_multithreaded_scheduler.exe -- "$@"
+EOF
+
+RUN cat > /usr/local/bin/run-highperf-scheduler << 'EOF'
+#!/bin/bash
+set -e
+eval $(opam env)
+cd /app
+echo "🚀 Starting HIGH-PERFORMANCE scheduler..."
+echo "Database: $1"  
+echo "Threads: ${2:-8}"
+echo "Volume: /data"
+exec dune exec bin/high_performance_reliable_scheduler.exe -- "$@"
+EOF
+
+RUN chmod +x /usr/local/bin/run-*-scheduler
+
+# Create database management scripts
+RUN cat > /usr/local/bin/db-info << 'EOF'
+#!/bin/bash
+echo "📊 DATABASE VOLUME INFO"
+echo "======================"
+echo "Volume mount: /data"
+echo "Available space:"
+df -h /data 2>/dev/null || echo "Volume not mounted"
+echo ""
+echo "Database files:"
+ls -lah /data/*.db 2>/dev/null || echo "No database files found in /data"
+echo ""
+echo "Total size:"
+du -sh /data 2>/dev/null || echo "Volume not accessible"
+EOF
+
+RUN cat > /usr/local/bin/scheduler-help << 'EOF'
+#!/bin/bash
+echo "🚀 FLY EMAIL SCHEDULER MACHINE"
+echo "==============================="
+echo ""
+echo "Available Commands:"
+echo "  run-reliable-scheduler <db_path> [threads]     - Run reliable scheduler"
+echo "  run-highperf-scheduler <db_path> [threads]     - Run high-performance scheduler"
+echo "  db-info                                        - Show database volume info"
+echo "  scheduler-help                                  - Show this help"
+echo ""
+echo "Database Location:"
+echo "  Volume mount: /data"
+echo "  Example: run-reliable-scheduler /data/org-123.db 8"
+echo ""
+echo "Performance Modes:"
+echo "  RELIABLE    - Conservative, bulletproof (15k+ contacts/sec)"
+echo "  HIGH-PERF   - Aggressive, 2GB cache (15k+ contacts/sec)"
+echo ""
+echo "Threading:"
+echo "  Default: 8 threads (optimal for most workloads)"
+echo "  Range: 1-32 threads"
+echo ""
+echo "Volume Management:"
+echo "  - 10GB persistent volume mounted at /data"
+echo "  - Upload databases to /data/ directory"
+echo "  - Results written back to same location"
+echo ""
+echo "Example Workflow:"
+echo "  1. Upload org database to /data/org-123.db"
+echo "  2. run-highperf-scheduler /data/org-123.db 8"
+echo "  3. Review results and sync back to Tigris"
+EOF
+
+RUN chmod +x /usr/local/bin/db-info /usr/local/bin/scheduler-help
+
+# Set up working directory
+USER opam
+WORKDIR /app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD test -d /data || exit 1
+
+# Default command shows help
+CMD ["scheduler-help"]
