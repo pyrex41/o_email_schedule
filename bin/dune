@@ -74,6 +74,18 @@
   threads))
 
 (executable
+ (public_name campaign_hybrid_performance_test)
+ (name campaign_hybrid_performance_test)
+ (libraries
+  scheduler
+  sqlite3
+  lwt
+  ptime
+  timedesc
+  yojson
+  threads))
+
+(executable
  (public_name native_performance_test)
  (name native_performance_test)
  (libraries
